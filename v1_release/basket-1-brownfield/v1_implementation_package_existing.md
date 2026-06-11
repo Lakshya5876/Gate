@@ -1,0 +1,666 @@
+# CLAUDE CODE — WORKSPACE INITIALIZATION PACKAGE
+## Edition: EXISTING REPOSITORIES (Brownfield)
+
+**Companion document:** `claude_code_development_guide_existing.md` (the Guide)
+**Time required:** ~25 minutes, one time per repository
+**Outcome:** The repository becomes a stateful, hook-enforced, senior-grade
+agentic engineering environment — without blocking on pre-existing debt.
+
+> **Status: specification verified through 3 audit rounds. Pending first live
+> init validation.** If you are the first team to run this package, expect to
+> confirm two things on the verification commit (Phase D) and report back:
+> (1) `gate.sh` does NOT crash on the `last_pass_sha: null` cold start — it
+> takes the all-files branch, never `git diff null..HEAD`; (2) the pre-push
+> hook refuses a dry-run push to a protected branch. If both fire cleanly,
+> the hook wiring is sound end-to-end and this banner can be removed.
+
+---
+
+> [!CAUTION]
+> ## V1 STRUCTURAL CEILING — MANDATORY PRE-CHECK BEFORE INITIALIZATION
+>
+> **This V1 Brownfield Reconnaissance Package enforces a hard ceiling of ≤ 200,000 Lines of Code (LOC).**
+>
+> It is optimized for standard single-root applications and microservices. Above 200k LOC, the automated
+> repository reconnaissance phase causes **severe context window inflation and performance degradation**
+> during initial scanning. Projects exceeding this threshold are not supported in V1 and must wait for
+> the **V2 Enterprise Monorepo Release**.
+>
+> ### YOU MUST RUN THIS CHECK BEFORE PROCEEDING
+>
+> Execute the following universal, language-agnostic command at your project root. It works on any stack
+> (Python, Node, Go, Java, Ruby, etc.) and counts every tracked source file without scanning
+> untracked build artifacts or dependencies:
+>
+> ```bash
+> find . -type f \
+>   -not -path "*/.git/*" \
+>   -not -path "*/node_modules/*" \
+>   -not -path "*/.venv/*" \
+>   -not -path "*/__pycache__/*" \
+>   -not -path "*/vendor/*" \
+>   -not -path "*/dist/*" \
+>   -not -path "*/build/*" \
+>   -not -path "*/.next/*" \
+>   | xargs wc -l 2>/dev/null | tail -1
+> ```
+>
+> **Decision rule — read the `total` number from the last line of output:**
+>
+> | Result | Action |
+> |---|---|
+> | ≤ 200,000 LOC | Proceed to STEP 1 below |
+> | > 200,000 LOC | **STOP. Do not proceed.** This repository exceeds the V1 ceiling. Halt initialization and wait for the V2 Enterprise Monorepo release. |
+>
+> Do not skip this check. Do not estimate. Run the command, read the number, then decide.
+
+---
+
+## STEP 1 — PRE-FLIGHT (human developer action)
+
+1. Confirm a clean working tree: `git status` shows "nothing to commit, working
+   tree clean".
+2. Create and switch to a setup branch — never run init on main/master/develop:
+   `git checkout -b chore/claude-init`
+3. Confirm your test framework, linter, and type checker are installed and run
+   from the repo root (e.g. `pytest`, `jest`, `ruff`, `eslint`, `mypy`, `tsc`).
+4. Copy `claude_code_development_guide_existing.md` (the Guide) into the
+   repository root. The init prompt reads it from disk — do NOT attach it.
+5. **Permission-mode check:** never run the init (or any session in a governed
+   repo) with `--dangerously-skip-permissions`. The generated settings pin
+   `defaultMode: "default"`; that pin only protects you if you don't override it
+   at the CLI.
+6. **Monorepo note:** if your repository contains multiple independently deployed
+   packages/services, run this init once PER PACKAGE you want governed, from that
+   package's root — one constitution per package, never one global constitution
+   for a monorepo.
+
+## STEP 2 — INITIALIZATION (paste the master prompt)
+
+Open Claude Code at the repository (or package) root. Paste the entire prompt
+below verbatim and press Enter.
+
+The init runs in TWO halves with a human checkpoint between them:
+- **Half 1 (read-only):** staged reconnaissance → DISCOVERY REPORT. Claude writes
+  NOTHING yet.
+- **You confirm or correct the report.** This is the only conversational step, and
+  it is deliberate: a wrong architecture discovery poisons every gate decision
+  afterwards. Thirty seconds of your review prevents that.
+- **Half 2 (write):** all files are generated, grounded in the confirmed report.
+
+---------------------------------- PROMPT START ----------------------------------
+
+Read the file `claude_code_development_guide_existing.md` in this repository's
+root. It is the engineering standard this initialization implements — internalize
+Sections 2 (configuration), 4 (stateful layer + enforcement hooks), 5 (gates),
+and 6 (test tiers) before doing anything.
+
+You are initializing an EXISTING repository. The prime directive: the
+constitution you generate must DESCRIBE the architecture that actually exists in
+this codebase — never prescribe a textbook ideal that contradicts reality. Every
+rule you write will be enforced on every future task; a rule that doesn't match
+the repo creates permanent noise.
+
+PHASE A — STAGED RECONNAISSANCE (READ-ONLY. Write NOTHING in this phase.)
+
+Execute in this exact order, cheapest first, and respect the budget caps:
+
+  A1. STRUCTURE PASS (no file contents):
+      - git ls-files | wc -l   (record total file count)
+      - Directory tree to depth 3 with per-directory file counts
+      - If total tracked files exceed 5,000: STOP after this pass, show me the
+        top-level map, and ask which subsystem/package this constitution should
+        govern. Re-scope all later passes to my answer.
+
+  A2. MANIFEST PASS (manifests only, no source):
+      - Read every dependency manifest present (requirements.txt,
+        pyproject.toml, package.json, go.mod, Cargo.toml, pom.xml, etc.)
+      - Read lockfile NAMES only (do not parse lockfile contents)
+      - Read CI config filenames (.circleci/, .github/workflows/, etc.)
+      - Identify: language(s) + versions, frameworks, test runner, linter,
+        type checker, build tool — record the EXACT commands the repo uses
+        (from CI config and manifest scripts, not from your assumptions).
+
+  A3. SAMPLED SOURCE PASS (strictly budgeted):
+      - From the A1 map, identify the apparent architectural layers (whatever
+        they actually are — handlers/, services/, lib/, utils/, a flat src/).
+      - Read 2–3 representative files PER layer, using offset+limit section
+        reads where files exceed ~200 lines. HARD CAP: 15 files total.
+      - From these, record: real naming conventions (function/class/file
+        naming as it IS), how errors are handled, how config/env vars are
+        accessed, how the DB or external services are called, how auth is
+        enforced, how tests are structured and what they mock.
+
+  A4. DEPENDENCY-GRAPH PASS (for CORE_FILES and test impact):
+      - Build a coarse import graph (grep import statements; this graph is a
+        LOWER BOUND — note where re-exports, dynamic imports, or DI/fixture
+        injection exist, because grep cannot see through them).
+      - Record every module imported by more than 5 other modules, plus
+        config, base models, DI wiring, and test fixtures — this becomes the
+        CORE_FILES list.
+      - Identify available test-impact tooling for the stack (pytest-testmon,
+        jest --changedSince, go test rdeps, bazel). If none is installed AND
+        the suite exceeds ~200 tests, installation at init is MANDATORY
+        (Guide §6 T3) — never deferred to "when the suite gets slow". It is
+        a dependency hard stop: request my approval in the discovery report.
+
+  A5. DEBT BASELINE PASS (identities, not just counts; fix NOTHING):
+      - Run the repo's linter, type checker, and (if available for the
+        stack) security scanner.
+      - For EVERY finding record: file, rule id, line, and a finding
+        fingerprint — a hash of the normalized code tokens surrounding the
+        finding (stable across line shifts, unique per defect).
+      - For every debt category with NO available scanner, record the
+        category as NO_SCANNER — absence must be loud, not silent.
+      - Run the test suite in collection-only mode; record total test count,
+        collection cleanliness, and (if cheap) full-suite wall time.
+      - Detect layer violations against the A3 architecture; record them
+        with the same identity schema.
+
+PHASE B — DISCOVERY REPORT (show me, then STOP and wait)
+
+Present a single report:
+
+  1. STACK: languages, frameworks, exact test/lint/typecheck/build commands
+  2. ARCHITECTURE AS FOUND: the real layers, their directories, the real
+     dependency direction, where it deviates from clean layering (descriptive,
+     no judgment)
+  3. CONVENTIONS AS FOUND: naming patterns, error handling style, config
+     access pattern, test structure and mocking pattern
+  4. DEBT BASELINE: finding counts by category and severity, plus the count
+     of distinct finding identities recorded; every NO_SCANNER category
+     listed explicitly
+  5. CORE_FILES: the proposed list from A4 with each entry's import count
+  6. TEST-IMPACT TOOLING: what exists; if none, which tool you propose to
+     install (this is a hard stop — I must approve it here)
+  7. PROPOSED HARD-STOP LIST: the universal list from Guide §2.2.3 plus any
+     repo-specific dangers you observed (e.g. a migrations/ directory, a
+     deploy script)
+  8. ANYTHING AMBIGUOUS: where you could not determine the convention and
+     what you propose to assume
+
+Then STOP. Do not write any file until I reply confirming or correcting the
+report. Incorporate my corrections as ground truth — they override your
+inferences wherever they conflict.
+
+PHASE C — DEPLOYMENT (after my confirmation, write everything, no further
+questions)
+
+  CRITICAL EXECUTION ORDER: Write .claude/settings.json LAST in Phase C, only
+  after all other governance files (CLAUDE.md, baseline.json, .githooks/,
+  quarantine.txt) have been fully written to disk. Once settings.json is
+  written, these files are completely agent-immutable by design. Re-running
+  initialization or repairing these files is a human-only action (hand-edit +
+  PR); the agent cannot self-repair.
+
+  C1. CLAUDE.md at the repository root — the DESCRIPTIVE constitution:
+      - Architecture enforcement section using the CONFIRMED layer names and
+        directories (never invented ones), with each layer's owns / must-not /
+        calls rules derived from observed reality
+      - Naming contracts AS DISCOVERED
+      - The universal security invariants (Guide §2.2.2) verbatim
+      - The ENFORCEMENT SCOPE rule verbatim from Guide §2.2.1 — constitution
+        applies fully to new files and modified regions; untouched legacy is
+        exempt until touched; flag debt, never block on it
+      - Hard stops: the confirmed list from the report, INCLUDING
+        permission-mode/settings changes, CORE_FILES edits, baseline changes
+        without an audit receipt, and quarantining a core-covering test
+      - The CORE_FILES glob list from the confirmed report
+      - The boundary caveats P1–P3 from Guide §2.3 (permission mode pinned,
+        git push always standalone — never in compound commands, refspec-force
+        banned in text and refused by the pre-push hook)
+      - Testing requirements referencing the 3-tier selection model (Guide §6)
+        with the repo's EXACT test commands per tier, transitive-closure rule
+        for CORE_FILES, and the grep-is-a-lower-bound escalation rule (T5)
+      - The auto-pipeline (recon → contract → execute → output) and the
+        commit/push gate including mandatory push confirmation, per Guide §5.3
+      - Checkpoint trigger rules C1–C5 and the resume protocol, per Guide §4.1
+      - A governance note (Guide §2.2.4): CLAUDE.md, the CORE_FILES list,
+        settings, hooks, and baseline change ONLY via human-authored PR, never
+        via agent edit; the agent never self-maintains the constitution
+
+  C2. .claude/settings.json:
+      - "defaultMode": "default" pinned at the top of permissions
+      - Allow list: the exact read-only commands, plus this repo's confirmed
+        test runner, linter, type checker, and build commands; git add/commit/
+        diff/status/log/update-index
+      - Deny list: git reset --hard, git rebase, git clean, rm -rf, sudo,
+        raw DDL (DROP/TRUNCATE/DELETE FROM), nc/ssh/scp,
+        ALL force-push variants ("git push --force", "git push -f",
+        "git push --force-with-lease", "git push --mirror",
+        "git push --delete"),
+        HOOK-EVASION variants ("git commit --no-verify*", "git commit -n *",
+        "git push --no-verify*", "git -c core.hooksPath*") — without these,
+        the allow-listed git commit is a silent back door around the entire
+        enforcement layer,
+        "Bash(SKIP_GATE=*)" (the agent must never be able to form the
+        bypass; verify the matcher catches env-prefixed commands — if it
+        does not, the pre-commit hook must refuse SKIP_GATE when
+        agent-environment markers like $CLAUDECODE are present),
+        and credential reads: "Read(.env)", "Read(**/.env)",
+        "Read(**/.env.*)", "Read(**/*.pem)", "Read(**/id_rsa*)",
+        "Read(**/.aws/credentials)", plus the equivalent Bash cat patterns,
+        and TRUST-ROOT writes (the agent must be mechanically blocked from
+        editing the files that constrain it): "Write(.githooks/**)",
+        "Edit(.githooks/**)", "Write(.claude/settings.json)",
+        "Edit(.claude/settings.json)", "Write(.claude/baseline.json)",
+        "Edit(.claude/baseline.json)", "Write(CLAUDE.md)", "Edit(CLAUDE.md)",
+        "Bash(git notes*remove*)", "Bash(git update-ref -d*)",
+        and PERSISTENT-HOOK-DISABLE + UNTRACKED-COMMIT variants:
+        "Bash(git config core.hooksPath*)",
+        "Bash(git config --add core.hooksPath*)", "Bash(git commit -a*)",
+        "Bash(git commit -am*)", "Bash(git commit --amend*)" — the persistent
+        git config form disables hooks for the whole clone, and -a/-am/--amend
+        break the index-equals-commit-tree guarantee the gate relies on
+      - git push appears in NEITHER list (Guide §2.3 — it must prompt
+        interactively, not be silently allowed or hard-blocked)
+
+  C3. .claude/baseline.json — the frozen debt baseline (Guide §4.3.2 schema):
+      - Per-finding identity records from A5: file -> [{rule, line_hint, fp}]
+      - Summary counts, scanners map (including every NO_SCANNER entry),
+        generated_at, generated_from_sha
+      - This file WILL be committed — it is shared team state
+
+  C4. .claude/commands/ — four command files, with this repo's REAL commands
+      substituted into every verification block:
+      - feature.md: Phases 0–5 per Guide §3.2 including stubs-first (Phase 2.5,
+        mandatory at 3+ files), the three-strike rule, the corrected index
+        protocol before every re-run (git update-index -q --refresh; git diff
+        --no-ext-diff — refresh reconciles stat metadata ONLY and must be
+        paired with a content-level check), TIER 1 tests after each file,
+        TIER 2 at the end, and checkpoint evaluation/writes at the phase
+        boundaries defined in Guide §4.1.3, and COST-WARNING FIRING per
+        Guide §7.1.1 (alert when a task iteration or phase exceeds ~40,000
+        context tokens or history-retransmission waste crosses 50%)
+      - audit.md: diff-scoped via the gate script's change set (files changed
+        since last_pass_sha + staged + unstaged + untracked; full-repo only on
+        explicit request). For file-level scanners apply the HUNK-INTERSECTION
+        rule (Guide §4.3.3a): scan the full file, intersect findings against
+        git diff -U0 hunk ranges; in-hunk findings are identity-checked
+        against baseline (new fp blocks, grandfathered passes); out-of-hunk
+        baseline findings are summarized in one line, never as noise.
+        Ratchet-down (R2): remove disappeared fingerprints from baseline.json
+        and record them in the audit receipt — /review validates every
+        baseline decrease against that receipt.
+        Finding fps are whitespace/format-insensitive (canonical token
+        stream before hashing); a simultaneous all-fp shift in a touched
+        file with rule+file+count unchanged is a re-fingerprint event —
+        re-anchor, do not block (Guide §4.3.2).
+        SEVERITY NORMALIZATION TABLE: generate a mapping from each
+        confirmed scanner's NATIVE levels (error/warning, E/W codes,
+        HIGH/MEDIUM/LOW) to the gate actions {block-await-human,
+        auto-remediate, record-only} and embed it in audit.md. Without
+        it, "CRITICAL/HIGH blocks" is undefined for linters that only
+        emit error/warning, and the agent guesses.
+      - review.md: ledger-aware pre-PR gate — recompute the FULL fingerprint
+        (Guide §4.2.3, including untracked files) and compare against
+        gate_state.json; SKIP loudly only on exact match, printing the
+        script-generated GATE REPORT verbatim (never a model-composed one).
+        Otherwise: diff inventory, lockfile assertion (any lockfile diff
+        without approved dependency = HARD STOP), per-changed-file layer
+        compliance, secrets-in-diff grep, TIER 2 test execution (transitive
+        closure for CORE_FILES), quarantine report (count + covered modules;
+        a quarantined test covering CORE_FILES = HARD STOP), baseline-delta
+        validation against audit receipts, conventional-commit verification,
+        PR body generation; finish by having the gate script write the new
+        receipt atomically.
+      - prep.md: converts a natural-language task into a SCOPE / OBJECTIVE /
+        CONSTRAINTS / VERIFY / OUTPUT execution contract, zero implementation,
+        hard stops flagged at the top.
+
+  C5. THE ENFORCEMENT LAYER — .githooks/ (Guide §4.5; this is what makes
+      every "blocks" in the constitution mechanical rather than volunteered):
+      - .githooks/gate.sh — the shared gate script. Its contract has exactly
+        one correct implementation; encode ALL of the following:
+          * TWO FINGERPRINT FORMS (Guide §4.2.3 F4): the working-tree
+            fingerprint (tree hash + pinned-config staged/unstaged diffs +
+            sorted shasums of untracked files) keys ONLY the in-session
+            ledger SKIP. Pre-commit receipts are keyed by the COMMIT TREE
+            (git write-tree on the index being committed, via a temp
+            index); pre-push matches git rev-parse 'HEAD^{tree}' against
+            that key. Conflating the two makes pre-push block every
+            legitimate push.
+          * SCAN TARGET in pre-commit context = the index tree (what is
+            actually being committed), never the working tree — git
+            commit -a and git add -p partial staging make them differ.
+          * COLD START: if last_pass_sha is null, the change set is ALL
+            tracked files + untracked files; on first pass set
+            last_pass_sha = HEAD. (git diff null..HEAD is a fatal error —
+            without this branch the gate crashes on the init verification
+            commit itself.)
+          * Scoped audit (hunk intersection + identity ratchet + severity
+            normalization table).
+          * TIER-2 ALGORITHM: query the installed test-impact tool with
+            the change set; run the returned set. Only if tooling is
+            absent (small repos): naming-contract-mapped tests of every
+            changed file PLUS the full transitive dependent test set of
+            any changed CORE_FILES entry (from the import graph), labeled
+            "TIER 2 (degraded: tooling absent)". grep is never the selector.
+          * IMPORT-GRAPH FRESHNESS: gate.sh must dynamically rebuild the
+            import graph whenever an import statement or a CORE_FILES entry
+            appears in the change set, or via a scheduled CI pipeline run.
+            A graph built once at init decays; the degraded path is a
+            short-lived bridge, never a permanent state.
+          * Full-suite wall-time recording and TIER TRANSITION REQUIRED
+            (Guide §6 T6).
+          * Atomic receipt writes (write tmp + rename) to gate_state.json.
+          * GATE REPORT emission to stdout.
+      - .githooks/pre-commit:
+          * if SKIP_GATE is set: apply Guide §4.4 K1 — deny-first, then
+            confirmation + reason via read -p from /dev/tty (a human-
+            presence backstop, not a categorical guarantee); on success
+            write the bypass as a git note (git notes --ref=bypasses add)
+            on the commit and exit 0
+          * else delegate to gate.sh; exit nonzero on any block
+      - .githooks/pre-push:
+          * refuse pushes to main/master/develop
+          * refuse any refspec beginning with '+'
+          * refuse any refspec containing a deletion semicolon targeting the
+            bypass trail (echo "$@" | grep -qE ":refs/notes/bypasses" must
+            return exit code 1)
+          * recompute git rev-parse 'HEAD^{tree}' and require a passing
+            receipt keyed by that commit-tree hash (never the working-tree
+            fingerprint)
+          * fetch refs/notes/bypasses, then enforce the bypass 24h deadline
+            using COMMITTER DATES, never ledger timestamps
+      - Per-clone activation (also wrapped in cc-init-hooks):
+          git config core.hooksPath .githooks
+          git config --add remote.origin.push  'refs/notes/bypasses:refs/notes/bypasses'
+          git config --add remote.origin.fetch '+refs/notes/bypasses:refs/notes/bypasses'
+        The notes refspecs are NOT optional: git does not push refs/notes/*
+        by default — without them the bypass audit trail never leaves the
+        laptop and CI cannot enforce the deadline.
+      - Add a CI job, after git fetch origin 'refs/notes/*:refs/notes/*',
+        so a hook-stripped clone still cannot merge unverified code. CI MUST
+        NOT run the PR branch's gate.sh. It must execute a copy fetched from
+        protected main to verify the PR's committed .githooks/ against a
+        hash recorded on main; a mismatch triggers an immediate CI failure.
+        CI parity is only authoritative if CI's gate script cannot be edited
+        by the change under review.
+        GOVERNANCE EVOLUTION PATH: governance and hook modifications are
+        strictly gated by CODEOWNERS and required human review on a protected
+        branch. The authoritative hash is updated by a privileged post-merge
+        job or derived from the merge commit on origin/main, NOT a
+        self-referential file inside the PR under review. CI compares against
+        origin/main's hooks after an approved merge, establishing the new
+        baseline.
+
+  C6. Stateful-layer bootstrap:
+      - .claude/gate_state.json with empty receipts and last_pass_sha: null
+        (written only by gate.sh from here on)
+      - .claude/checkpoints/ with a README.md stating the schema from
+        Guide §4.1.4 and the 10-file retention rule
+      - quarantine.txt (empty, committed) with a header comment explaining
+        Guide §6 T4
+
+  C7. .gitignore additions (append, do not rewrite):
+      .claude/gate_state.json
+      .claude/checkpoints/
+
+  C8. .team_aliases at the repository root: write APPENDIX B of this document
+      VERBATIM, substituting only the <source-dirs> placeholder with this
+      repo's confirmed source and test directories (from the discovery
+      report). If a placeholder has no confirmed value, ask — never guess.
+      Beyond that substitution the file is byte-identical to Appendix B.
+      Do not invent, add, or omit functions — security-relevant shell is
+      never generated from memory.
+
+PHASE D — VERIFICATION AND MANIFEST
+
+  D1. Re-run the test suite in collection mode — confirm the init broke
+      nothing (it wrote no source code; this is a sanity check).
+  D2. Make a no-op commit on the setup branch to prove the pre-commit hook
+      fires and emits a GATE REPORT; then verify the pre-push hook refuses
+      a dry-run push to a protected branch name.
+  D3. Output a manifest table: File | Purpose | Key rules encoded.
+  D4. Output the three-line summary I can paste to my team lead:
+      what was installed, what the baseline counts are, what changes about
+      daily workflow (answer: type intent; hooks and tiers handle the rest).
+  D5. Remind me: commit CLAUDE.md, .claude/settings.json, baseline.json,
+      commands/, .githooks/, quarantine.txt, .team_aliases, .gitignore —
+      and that gate_state.json and checkpoints/ stay untracked.
+
+----------------------------------- PROMPT END -----------------------------------
+
+## STEP 3 — REVIEW THE DISCOVERY REPORT (the one human checkpoint)
+
+When Claude presents the Phase B report, check these six things before saying
+"confirmed":
+
+1. **Layer names match reality.** If it says "services layer" and your repo calls
+   it `lib/`, correct it now — every future gate check depends on this.
+2. **Commands are yours.** The test/lint commands must be the ones YOUR CI runs,
+   not generic defaults.
+3. **Debt identities look plausible.** Wildly low counts mean a scanner didn't
+   run — ask. Every NO_SCANNER category should be explicitly listed.
+4. **CORE_FILES list is sane.** Your shared utilities, config, base models, and
+   fixtures should all be on it. A missing core file = tier 3 never fires for it.
+5. **Test-impact tooling.** If Claude proposes installing one, approve or reject
+   it HERE (it's a dependency hard stop).
+6. **Hard-stop list covers your dangers.** Migrations directory? Deploy scripts?
+   Add them.
+
+Reply with corrections or "confirmed". Claude proceeds to Phase C without further
+questions.
+
+## STEP 4 — ACTIVATION (human developer action)
+
+1. Review the generated CLAUDE.md once, end to end. It governs everything.
+2. Verify hooks are active: `git config core.hooksPath` must print `.githooks`.
+3. Commit the governance files on your setup branch:
+   `git add CLAUDE.md .claude/settings.json .claude/baseline.json .claude/commands/ .githooks/ quarantine.txt .team_aliases .gitignore`
+   `git commit -m "chore(claude): initialize agentic engineering environment"`
+   (The pre-commit hook fires on this very commit — that's the system working.)
+4. Open a PR — your team should see and approve the constitution like any code.
+5. Activate aliases: `source .team_aliases`, then lock in:
+   `echo "source $(pwd)/.team_aliases" >> ~/.zshrc`
+6. Every teammate, after cloning/pulling: `cc-init-hooks` (one time).
+
+## STEP 5 — DAILY WORKFLOW (from now on)
+
+The mental model to internalize: **you talk to Claude normally.** You do not write
+execution contracts by hand — the auto-pipeline (CLAUDE.md §9) derives one from any
+code-change message, and the git hooks enforce the gate mechanically no matter what
+the session does. Your only standing jobs are: use `/prep` for non-trivial work,
+answer hard-stop questions, confirm pushes, and start a fresh session per task.
+
+The loop is identical in both environments; only the surface differs. Read the
+section for the client you use.
+
+### 5A. CLAUDE CODE — CLI (terminal)
+
+One-time, per clone (DO THIS FIRST or the local hooks never fire):
+
+```
+source .team_aliases                 # or rely on the ~/.zshrc line from STEP 4
+cc-init-hooks                         # sets core.hooksPath + bypass-note refspecs
+```
+
+Then, end to end:
+
+1. **Start a task.** `cc-feature "add an overdue-invoice filter"` — the wrapper
+   refuses to launch on main/master/develop ("create a feature branch first")
+   before Claude even starts. For a small, well-scoped change this is all you type.
+2. **Scope something bigger first.** `/prep <description>` inside the session →
+   review the SCOPE/OBJECTIVE/CONSTRAINTS contract → correct it in plain English →
+   it executes. Use `cc-scope <symbol>` to see a change's impact radius first.
+3. **Answer hard stops.** When the agent hits a new dependency, schema change,
+   auth change, or a governance file, it STOPS and asks. Reply with the decision.
+   It cannot edit CLAUDE.md / settings.json / baseline.json / .githooks — those
+   are human-PR-only, and it will say so if you ask.
+4. **Commit + push.** Say `commit and push`. The model runs audit → review →
+   tiered tests and prints a GATE REPORT (loud SKIPs on unchanged parts). It then
+   states the branch + remote and waits for your `yes` (Gate Step 4). The
+   pre-commit / pre-push hooks fire mechanically regardless.
+   - Prefer `cc-push`: it prints branch + remote and makes you **type the branch
+     name** at the terminal (`/dev/tty`) to confirm — a fourth, model-independent
+     human gate. The `git push` permission prompt appears as a terminal y/n.
+5. **Next task = new session.** One task per session. A new session in the repo
+   auto-resumes from `.claude/checkpoints/LATEST.md`; `cc-checkpoint` writes one
+   by hand before you stop. Heed the §7.1.1 cost warning — `/compact` or restart.
+6. **Emergency only.** `SKIP_GATE=1 git commit ...` typed BY YOU in a plain
+   terminal (never through the agent — it's deny-listed). The hook demands a typed
+   reason via `/dev/tty`, records a git note, and starts the 24h re-run clock.
+
+### 5B. CLAUDE CODE — Desktop app
+
+One-time, per clone (DO THIS FIRST or the local hooks never fire). The app has no
+shell aliases, so run the activation directly in the repo, or use the setup target:
+
+```
+git config core.hooksPath .githooks
+git config --add remote.origin.push  'refs/notes/bypasses:refs/notes/bypasses'
+git config --add remote.origin.fetch '+refs/notes/bypasses:refs/notes/bypasses'
+```
+
+Then, end to end:
+
+1. **Start a task.** Type the request in chat in plain English, or use `/feature
+   <description>`. There is no `cc-feature` branch-guard wrapper here — instead the
+   pipeline's Phase 0 pre-flight checks the branch and refuses to proceed on
+   main/master/develop. Same protection, enforced inside the pipeline.
+2. **Scope something bigger first.** `/prep <description>` → review the contract in
+   chat → correct it → it executes. This is the recommended path for anything
+   multi-file or touching shared/core modules.
+3. **Answer hard stops.** Same as CLI — the agent stops and asks on new deps,
+   schema, auth, or governance files, and cannot edit the trust-root files.
+4. **Commit + push.** Say `commit and push`. Same GATE REPORT, same hooks. The
+   difference: **the `git push` permission prompt is a UI approval card**, not a
+   terminal y/n, and there is no `cc-push` "type the branch" step — so the **Gate
+   Step 4 chat confirmation is your primary human gate.** Actually read the
+   branch + remote line before clicking Allow; don't reflex-approve the dialog.
+5. **Next task = new conversation.** Start a new conversation for an unrelated
+   task. Checkpoints are written automatically at phase boundaries; if you want
+   one before stopping, just say "write a checkpoint." Heed the §7.1.1 cost warning.
+6. **Emergency only.** Same rule: `SKIP_GATE=1 git commit ...` is typed BY YOU in a
+   real terminal outside the app — the agent is deny-listed from forming it, and
+   the hook's `/dev/tty` reason prompt cannot be answered by the app's subprocess.
+
+## WHAT SUCCESS LOOKS LIKE (first two weeks)
+
+| Signal | Expected |
+|---|---|
+| First gate run | Passes despite existing debt (baseline absorbs it by identity) |
+| Small change after a push | Gate completes in seconds with loud script-emitted SKIPs |
+| New SQL injection introduced deliberately (try it) | Pre-commit hook BLOCKS — new fingerprint not in baseline, even if you also fixed an old finding in the same file |
+| Brand-new untracked file with a finding | Gate runs (fingerprint includes untracked files) and BLOCKS |
+| `SKIP_GATE=1` from a Claude session | Blocked by settings deny; TTY adds human-presence assurance where the agent has no terminal |
+| Session killed mid-task, reopened | Resume from checkpoint in under a minute |
+| baseline.json after 10 merged PRs | Identity entries strictly fewer than at init, each decrease backed by an audit receipt |
+
+---
+
+## APPENDIX B — CANONICAL .team_aliases (written verbatim by init step C8)
+
+```bash
+#!/usr/bin/env bash
+# Claude Code team aliases — generated by the init package, edited only via PR.
+# Source in ~/.zshrc:  echo "source $(pwd)/.team_aliases" >> ~/.zshrc
+
+# One-time activation per clone: hooks + bypass-note propagation.
+# (git does not push refs/notes/* by default — without the refspecs the
+#  bypass audit trail never leaves this machine.)
+cc-init-hooks() {
+    git config core.hooksPath .githooks
+    git config --add remote.origin.push  'refs/notes/bypasses:refs/notes/bypasses'
+    git config --add remote.origin.fetch '+refs/notes/bypasses:refs/notes/bypasses'
+    echo "Hooks active: .githooks (bypass-note refspecs configured)"
+}
+
+# Branch-guarded feature entry point — the standard way to start any task.
+cc-feature() {
+    [ -z "$1" ] && echo "Usage: cc-feature <description>" && return 1
+    local branch=$(git branch --show-current)
+    case "$branch" in
+        main|master|develop)
+            echo "ERROR: on protected branch '$branch'. Create a feature branch first."
+            return 1;;
+    esac
+    claude "/feature $*"
+}
+
+# Scoped audit of current changes (full repo only if no changes).
+cc-audit() {
+    local changed=$(git diff main...HEAD --name-only | tr '\n' ' ')
+    [ -z "$changed" ] && claude "/audit" || claude "/audit Scope: $changed"
+}
+
+cc-review() { claude "/review"; }
+
+# Impact radius for a symbol before touching it.
+# <source-dirs> is substituted at init with the repo's confirmed
+# source and test directories (e.g. "app/ tests/" or "src/ spec/").
+cc-scope() {
+    [ -z "$1" ] && echo "Usage: cc-scope <symbol>" && return 1
+    echo "=== Impact radius for '$1' (grep lower bound — see Guide §6 T5) ==="
+    grep -rn "$1" <source-dirs> 2>/dev/null | head -30
+}
+
+# cc-checkpoint — the STANDARD manual checkpoint command. Run it on demand to
+# write the Guide §4.1.4 state schema straight to .claude/checkpoints/ (state,
+# not conversation), refresh LATEST.md, and enforce 10-file retention. Use it
+# before /compact, before a restart, or whenever a resumable snapshot is wanted.
+cc-checkpoint() {
+    mkdir -p .claude/checkpoints
+    local ts=$(date +%Y%m%d-%H%M)
+    local f=".claude/checkpoints/${ts}-manual.md"
+    {
+        echo "# CHECKPOINT"
+        echo "phase:        manual"
+        echo "git_sha:      $(git rev-parse HEAD)"
+        echo "branch:       $(git branch --show-current)"
+        echo "dirty_files:  $(git status --porcelain | wc -l | tr -d ' ') uncommitted"
+        echo "timestamp:    ${ts}"
+        echo ""
+        echo "## FILES MODIFIED THIS SESSION"
+        git diff --name-only HEAD
+        echo ""
+        echo "## RESUME INSTRUCTION"
+        echo "<fill in before closing the session>"
+    } > "$f"
+    cp "$f" .claude/checkpoints/LATEST.md
+    # Retention: keep the 10 most recent checkpoint files.
+    find .claude/checkpoints -name '2*.md' -type f 2>/dev/null | sort -r | tail -n +11 | while read -r f; do rm -f "$f"; done
+    echo "Checkpoint: $f"
+}
+
+# Model-independent human-in-the-loop push. The pre-push hook still runs.
+# Confirmation reads /dev/tty directly: piped stdin cannot auto-confirm
+# (printf 'branch\n' | cc-push fails by design).
+cc-push() {
+    local branch=$(git branch --show-current)
+    case "$branch" in
+        main|master|develop)
+            echo "ERROR: direct push to '$branch' is forbidden."
+            return 1;;
+    esac
+    # Resolve the remote the way git push would — never "first remote
+    # alphabetically", which silently picks 'fork' over 'origin'.
+    local remote=$(git config --get "branch.${branch}.pushRemote" \
+                || git config --get remote.pushDefault \
+                || echo origin)
+    echo "About to push: branch '$branch' -> remote '$remote'"
+    printf "Type the branch name to confirm: "
+    local confirm
+    read -r confirm < /dev/tty || { echo "No TTY — aborted."; return 1; }
+    [ "$confirm" != "$branch" ] && echo "Aborted (input did not match)." && return 1
+    git push "$remote" "$branch"
+}
+
+# Auto-loaded CLAUDE.md token cost per project.
+cc-context-size() {
+    find . -name "CLAUDE.md" -not -path "*/node_modules/*" | while read -r f; do
+        local chars=$(wc -c < "$f")
+        echo "  $f: $chars chars (~$((chars/4)) tokens auto-loaded)"
+    done
+}
+```
+
+Notes on the appendix:
+- There is deliberately NO cc-hotfix: emergencies go through `cc-feature` on a
+  `hotfix/*` branch (full gate, tier-1 tests are fast) or, for true
+  production-down moments, the human-typed `SKIP_GATE=1` path with its TTY
+  confirmation and git-note audit trail. A separate alias invoking a command
+  that may not exist is how phantom workflows are born.
+- `cc-push` complements, never replaces, the pre-push hook and the Gate Step 4
+  chat confirmation — three independent layers.
