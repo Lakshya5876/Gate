@@ -214,6 +214,24 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
             or have gate.sh construct it live from the naming-contract layout.
             Until the graph exists, Tier-2-degraded falls back entirely to a
             full suite run to avoid coverage blind spots.
+          * LINTER: run LINT_CMD (recorded at init in gate_state.json)
+            scoped to changed files where the tool supports it; non-zero
+            exit blocks the commit. Absence must be loud: record
+            NO_LINTER in the gate report, never silently skip.
+          * TYPE CHECKER: run TYPECHECK_CMD (recorded at init) on the
+            full project; non-zero exit blocks the commit. Record
+            NO_TYPECHECKER if absent.
+          * COVERAGE GATE: after the test run, assert line coverage ≥
+            COVERAGE_THRESHOLD (default 80%, stored in gate_state.json).
+            If coverage drops below threshold the commit is blocked.
+            Lowering the threshold requires a human PR, never an agent.
+          * COMPLEXITY GATE: run the stack's complexity scanner (radon
+            cc -n C for Python, eslint complexity rule for JS/TS,
+            gocyclo for Go) on changed files only; block if any function
+            exceeds COMPLEXITY_THRESHOLD (default cyclomatic complexity
+            10, stored in gate_state.json). High complexity is a leading
+            indicator of performance regression — cheaper to block at
+            commit time than profile in production.
           * Atomic receipt writes (write tmp + rename) to gate_state.json.
           * GATE REPORT emission to stdout.
       - .githooks/pre-commit:

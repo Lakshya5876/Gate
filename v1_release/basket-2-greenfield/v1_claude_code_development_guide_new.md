@@ -679,6 +679,27 @@ transition, or have gate.sh construct it live from the naming-contract layout.
 Until the graph exists, Tier-2-degraded falls back entirely to a full suite run
 to avoid coverage blind spots.
 
+**Linter (hard gate):** run `LINT_CMD` (recorded in gate_state.json at init)
+scoped to changed files where the tool supports it. Non-zero exit blocks the
+commit. Absence must be explicit: record `NO_LINTER` in the gate report, never
+silently skip.
+
+**Type checker (hard gate):** run `TYPECHECK_CMD` (recorded at init) on the
+full project. Non-zero exit blocks the commit. Record `NO_TYPECHECKER` if absent.
+
+**Coverage gate (hard gate — 80% floor):** after the test run, assert line
+coverage ≥ `COVERAGE_THRESHOLD` (default 80%, stored in gate_state.json). Block
+the commit if coverage drops below threshold. The threshold is human-editable
+via PR only — agents cannot lower it.
+
+**Complexity gate (performance proxy):** run the stack's complexity scanner
+(`radon cc -n C` for Python, eslint complexity rule for JS/TS, `gocyclo` for Go)
+on changed files only. Block the commit if any function exceeds
+`COMPLEXITY_THRESHOLD` (default cyclomatic complexity 10, stored in
+gate_state.json). High complexity is the leading structural indicator of
+performance regression — blocking it at commit time is cheaper than profiling
+in production.
+
 **pre-push:** (1) refuse pushes to main/master/develop; (2) refuse any refspec
 beginning with `+` (force syntax no settings pattern can catch); (3) recompute
 `git rev-parse 'HEAD^{tree}'` and require a passing receipt keyed by that

@@ -947,6 +947,28 @@ TIER-2 SELECTION ALGORITHM (gate.sh must implement exactly this):
      (transitive, from the init-built import graph) — and label the
      report "TIER 2 (degraded: tooling absent)". grep alone is never
      the selector (§6 T5).
+
+LINTER (hard gate — runs after security scan):
+  Run LINT_CMD (recorded in gate_state.json at init) scoped to changed
+  files where the tool supports it. Non-zero exit blocks the commit.
+  Absence must be explicit: record NO_LINTER in the gate report.
+
+TYPE CHECKER (hard gate — runs after linter):
+  Run TYPECHECK_CMD (recorded in gate_state.json at init) on the full
+  project. Non-zero exit blocks the commit. Record NO_TYPECHECKER if
+  absent.
+
+COVERAGE GATE (hard gate — runs after test execution):
+  Assert line coverage ≥ COVERAGE_THRESHOLD (default 80%, stored in
+  gate_state.json). Block the commit if coverage drops below threshold.
+  The threshold is human-editable via PR only — agents cannot lower it.
+
+COMPLEXITY GATE (performance proxy — runs on changed files only):
+  Run the stack's complexity scanner (radon cc -n C for Python,
+  eslint with complexity rule for JS/TS, gocyclo for Go). Block the
+  commit if any function exceeds COMPLEXITY_THRESHOLD (default
+  cyclomatic complexity 10, stored in gate_state.json). High complexity
+  is the leading structural indicator of performance regression.
 ```
 
 ### 4.5.3 pre-push responsibilities
