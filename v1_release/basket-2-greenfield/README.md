@@ -1,5 +1,12 @@
 # Basket 2 — Greenfield Onboarding
 
+> [!IMPORTANT]
+> **START HERE: open [`v1_implementation_package_new.md`](v1_implementation_package_new.md) and read it end to end before doing anything else.**
+> It contains the pre-flight checklist and the exact prompt to paste into Claude Code to scaffold and govern your new project.
+>
+> The other file — `v1_claude_code_development_guide_new.md` — is the engineering constitution for **Claude Code to read**, not you.
+> You will copy it into your new repository as `CLAUDE.md`; the agent internalises it automatically. You do not need to read it yourself.
+
 **For teams starting new projects completely from scratch.**
 
 This directory contains the V1 greenfield workflow assets. Use these if you are beginning

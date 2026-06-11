@@ -25,12 +25,14 @@ The framework ships in two variants — one for each type of codebase your org w
 
 ## Contents
 
-| Path | File | Purpose |
-|---|---|---|
-| `basket-1-brownfield/` | `v1_claude_code_development_guide_existing.md` | Full brownfield engineering constitution — layer rules, naming contracts, security invariants, enforcement mechanics |
-| `basket-1-brownfield/` | `v1_implementation_package_existing.md` | One-time init prompt — runs automated repo recon, freezes debt baseline, wires all git hooks |
-| `basket-2-greenfield/` | `v1_claude_code_development_guide_new.md` | Full greenfield engineering constitution — prescriptive from commit one |
-| `basket-2-greenfield/` | `v1_implementation_package_new.md` | One-time init prompt — scaffolds four-layer directory structure and wires all git hooks |
+> **Reading order:** each basket contains two files. Always open the **Implementation Package first** — it is your human onboarding guide and contains the step-by-step instructions and the Claude Code prompt. The **Development Guide** is the engineering constitution that Claude Code reads automatically; copy it into your repo as `CLAUDE.md` and let the agent do the rest.
+
+| Path | File | Read by | Purpose |
+|---|---|---|---|
+| `basket-1-brownfield/` | `v1_implementation_package_existing.md` | **You (human)** — read this first | Pre-flight checklist, LOC ceiling check, one-time init prompt |
+| `basket-1-brownfield/` | `v1_claude_code_development_guide_existing.md` | **Claude Code** — becomes `CLAUDE.md` | Full brownfield engineering constitution — layer rules, naming contracts, security invariants, enforcement mechanics |
+| `basket-2-greenfield/` | `v1_implementation_package_new.md` | **You (human)** — read this first | Pre-flight checklist, one-time init prompt |
+| `basket-2-greenfield/` | `v1_claude_code_development_guide_new.md` | **Claude Code** — becomes `CLAUDE.md` | Full greenfield engineering constitution — prescriptive from commit one |
 
 ## Core Safety Pillars
 
