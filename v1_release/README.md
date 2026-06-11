@@ -25,7 +25,7 @@ The framework ships in two variants — one for each type of codebase your org w
 
 ## Contents
 
-> **Reading order:** each basket contains two files. Always open the **Implementation Package first** — it is your human onboarding guide and contains the step-by-step instructions and the Claude Code prompt. The **Development Guide** is the engineering constitution that Claude Code reads automatically; copy it into your repo as `CLAUDE.md` and let the agent do the rest.
+> **Reading order:** each basket contains two files. Always open the **Implementation Package first** — it is your human onboarding guide and contains the step-by-step instructions and the Claude Code prompt. The **Development Guide** is the engineering constitution that Claude Code reads automatically; copy it into your repo as it is and let the agent do the rest.
 
 | Path | File | Read by | Purpose |
 |---|---|---|---|

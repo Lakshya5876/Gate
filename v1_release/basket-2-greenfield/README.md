@@ -5,7 +5,7 @@
 > It contains the pre-flight checklist and the exact prompt to paste into Claude Code to scaffold and govern your new project.
 >
 > The other file — `v1_claude_code_development_guide_new.md` — is the engineering constitution for **Claude Code to read**, not you.
-> You will copy it into your new repository as `CLAUDE.md`; the agent internalises it automatically. You do not need to read it yourself.
+> You will copy it into your new repository as it is; the agent internalises it automatically. You do not need to read it yourself.
 
 **For teams starting new projects completely from scratch.**
 

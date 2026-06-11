@@ -5,7 +5,7 @@
 > It contains the pre-flight checklist, the LOC ceiling check, and the exact prompt to paste into Claude Code.
 >
 > The other file — `v1_claude_code_development_guide_existing.md` — is the engineering constitution for **Claude Code to read**, not you.
-> You will copy it into your target repository as `CLAUDE.md`; the agent internalises it automatically. You do not need to read it yourself.
+> You will copy it into your target repository as it is; the agent internalises it automatically. You do not need to read it yourself.
 
 **For teams with existing, active codebases.**
 
