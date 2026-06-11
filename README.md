@@ -1,6 +1,6 @@
 # ai-dev-workflow
 
-**The master corporate home for all automated AI developer workflows at Bank of Loyal.**
+**The master corporate home for all automated AI developer workflows.**
 
 This repository is the single source of truth for deploying enterprise-grade AI development
 governance across engineering teams. It currently covers **Claude Code** and is structured
