@@ -32,4 +32,3 @@ ai-dev-workflow/
 |---|---|
 | Claude Code | V1 — Available now |
 | Cursor | Planned — future release |
-| GitHub Copilot | Planned — future release |
