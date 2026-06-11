@@ -1,7 +1,7 @@
 # CLAUDE CODE — WORKSPACE INITIALIZATION PACKAGE
 ## Edition: EXISTING REPOSITORIES (Brownfield)
 
-**Companion document:** `claude_code_development_guide_existing.md` (the Guide)
+**Companion document:** `v1_claude_code_development_guide_existing.md` (the Guide)
 **Time required:** ~25 minutes, one time per repository
 **Outcome:** The repository becomes a stateful, hook-enforced, senior-grade
 agentic engineering environment — without blocking on pre-existing debt.
@@ -64,7 +64,7 @@ agentic engineering environment — without blocking on pre-existing debt.
    `git checkout -b chore/claude-init`
 3. Confirm your test framework, linter, and type checker are installed and run
    from the repo root (e.g. `pytest`, `jest`, `ruff`, `eslint`, `mypy`, `tsc`).
-4. Copy `claude_code_development_guide_existing.md` (the Guide) into the
+4. Copy `v1_claude_code_development_guide_existing.md` (the Guide) into the
    repository root. The init prompt reads it from disk — do NOT attach it.
 5. **Permission-mode check:** never run the init (or any session in a governed
    repo) with `--dangerously-skip-permissions`. The generated settings pin
@@ -90,7 +90,7 @@ The init runs in TWO halves with a human checkpoint between them:
 
 ---------------------------------- PROMPT START ----------------------------------
 
-Read the file `claude_code_development_guide_existing.md` in this repository's
+Read the file `v1_claude_code_development_guide_existing.md` in this repository's
 root. It is the engineering standard this initialization implements — internalize
 Sections 2 (configuration), 4 (stateful layer + enforcement hooks), 5 (gates),
 and 6 (test tiers) before doing anything.
@@ -245,6 +245,10 @@ questions)
         "Edit(.githooks/**)", "Write(.claude/settings.json)",
         "Edit(.claude/settings.json)", "Write(.claude/baseline.json)",
         "Edit(.claude/baseline.json)", "Write(CLAUDE.md)", "Edit(CLAUDE.md)",
+        "Write(v1_claude_code_development_guide_existing.md)",
+        "Edit(v1_claude_code_development_guide_existing.md)",
+        "Write(v1_implementation_package_existing.md)",
+        "Edit(v1_implementation_package_existing.md)",
         "Bash(git notes*remove*)", "Bash(git update-ref -d*)",
         and PERSISTENT-HOOK-DISABLE + UNTRACKED-COMMIT variants:
         "Bash(git config core.hooksPath*)",

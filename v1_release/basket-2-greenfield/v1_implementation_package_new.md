@@ -1,7 +1,7 @@
 # CLAUDE CODE — WORKSPACE INITIALIZATION PACKAGE
 ## Edition: NEW PROJECTS (Greenfield)
 
-**Companion document:** `claude_code_development_guide_new.md` (the Guide)
+**Companion document:** `v1_claude_code_development_guide_new.md` (the Guide)
 **Time required:** ~12 minutes, once at project birth
 **Outcome:** A repository born governed — prescriptive architecture, hook-enforced
 gates from commit #1, zero debt ever.
@@ -27,7 +27,7 @@ gates from commit #1, zero debt ever.
    - **Persistence:** database/store, if known (it can be added later via the
      hard-stop process)
    - **Test framework + linter + type checker** for that stack
-4. Copy `claude_code_development_guide_new.md` (the Guide) into the repository
+4. Copy `v1_claude_code_development_guide_new.md` (the Guide) into the repository
    root. The init prompt reads it from disk — do NOT attach it.
 5. **Permission-mode check:** never run the init (or any session in a governed
    repo) with `--dangerously-skip-permissions`. The generated settings pin
@@ -44,7 +44,7 @@ deploys everything without further conversation.
 
 ---------------------------------- PROMPT START ----------------------------------
 
-Read the file `claude_code_development_guide_new.md` in this repository's root.
+Read the file `v1_claude_code_development_guide_new.md` in this repository's root.
 It is the engineering standard this initialization implements — internalize
 Sections 2 (configuration), 4 (stateful layer + enforcement hooks), 5 (gates),
 and 6 (testing discipline) before doing anything.
@@ -135,6 +135,10 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         "Edit(.githooks/**)", "Write(.claude/settings.json)",
         "Edit(.claude/settings.json)", "Write(.claude/baseline.json)",
         "Edit(.claude/baseline.json)", "Write(CLAUDE.md)", "Edit(CLAUDE.md)",
+        "Write(v1_claude_code_development_guide_new.md)",
+        "Edit(v1_claude_code_development_guide_new.md)",
+        "Write(v1_implementation_package_new.md)",
+        "Edit(v1_implementation_package_new.md)",
         "Bash(git notes*remove*)", "Bash(git update-ref -d*)",
         and PERSISTENT-HOOK-DISABLE + UNTRACKED-COMMIT variants:
         "Bash(git config core.hooksPath*)",

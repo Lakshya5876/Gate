@@ -137,7 +137,7 @@ The output ceiling is always the prompt floor.
 your-repository/
 |
 +-- CLAUDE.md                    <- Constitution (auto-loaded every session)
-+-- claude_code_development_guide_existing.md   <- this document (gitignored or docs/)
++-- v1_claude_code_development_guide_existing.md   <- this document (gitignored or docs/)
 |
 +-- .claude/
 |   +-- settings.json            <- Permission boundaries

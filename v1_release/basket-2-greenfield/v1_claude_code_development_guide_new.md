@@ -118,7 +118,7 @@ The output ceiling is always the prompt floor.
 your-repository/
 |
 +-- CLAUDE.md                    <- PRESCRIPTIVE constitution (auto-loaded)
-+-- claude_code_development_guide_new.md
++-- v1_claude_code_development_guide_new.md
 |
 +-- .claude/
 |   +-- settings.json            <- Permission boundaries
