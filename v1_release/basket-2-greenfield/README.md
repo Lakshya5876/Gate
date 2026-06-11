@@ -20,7 +20,7 @@ fresh workspaces and scales with the project as it grows.
 
 | File | Purpose |
 |---|---|
-| `v1_claude_code_development_guide_new.md` | The greenfield engineering constitution — copy this into your repo as `CLAUDE.md` |
+| `v1_claude_code_development_guide_new.md` | The greenfield engineering constitution — copy this into your repo root as-is; the init prompt reads it from disk and Claude Code generates `CLAUDE.md` from it |
 | `v1_implementation_package_new.md` | The one-time init prompt — paste this into Claude Code to scaffold and govern your new project |
 
 ## Onboarding Steps
@@ -35,10 +35,10 @@ git checkout -b develop
 Do not add any files yet. The initialization package will scaffold the correct structure for you.
 
 **Step 2 — Copy the guide into your repository**
-Copy `v1_claude_code_development_guide_new.md` into the root of your new repository and
-rename it `CLAUDE.md`. This is the engineering constitution Claude Code reads before taking
-any action. It defines your four-layer architecture, naming contracts, security invariants,
-and enforcement rules from day one.
+Copy `v1_claude_code_development_guide_new.md` into the root of your new repository,
+keeping the filename exactly as-is. The init prompt reads it from disk — Claude Code uses it
+to generate the `CLAUDE.md` constitution prescribing your four-layer architecture, naming
+contracts, security invariants, and enforcement rules from day one.
 
 **Step 3 — Execute the initialization package**
 Open Claude Code (CLI or Desktop app) inside your new repository. Paste the full contents

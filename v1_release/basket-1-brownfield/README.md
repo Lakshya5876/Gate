@@ -41,7 +41,7 @@ with your repository in V1. Wait for the V2 Enterprise Monorepo release.
 
 | File | Purpose |
 |---|---|
-| `v1_claude_code_development_guide_existing.md` | The engineering constitution — copy this into your repo as `CLAUDE.md` |
+| `v1_claude_code_development_guide_existing.md` | The engineering constitution — copy this into your repo root as-is; the init prompt reads it from disk and Claude Code generates `CLAUDE.md` from it |
 | `v1_implementation_package_existing.md` | The one-time init prompt — paste this into Claude Code to run automated repository reconnaissance |
 
 ## Onboarding Steps
@@ -50,9 +50,9 @@ with your repository in V1. Wait for the V2 Enterprise Monorepo release.
 Run the command above. Confirm your repo is under 200,000 LOC. If it is, continue.
 
 **Step 2 — Copy the guide into your repository**
-Copy `v1_claude_code_development_guide_existing.md` into the root of your target repository
-and rename it `CLAUDE.md`. This becomes the engineering constitution Claude Code reads before
-taking any action in that repository.
+Copy `v1_claude_code_development_guide_existing.md` into the root of your target repository,
+keeping the filename exactly as-is. The init prompt reads it from disk — Claude Code uses it
+to generate the `CLAUDE.md` constitution tailored to your specific repository's architecture.
 
 **Step 3 — Execute the initialization package**
 Open Claude Code (CLI or Desktop app) inside your target repository. Create a new setup branch:
