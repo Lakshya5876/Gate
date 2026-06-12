@@ -111,7 +111,8 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         settings, hooks, and baseline change ONLY via human-authored PR, never
         via agent edit; the agent never self-maintains the constitution
 
-  B3. .claude/settings.json per Guide §2.3:
+  B3. [DEFERRED — written LAST per CRITICAL EXECUTION ORDER above]
+      .claude/settings.json per Guide §2.3:
       - "defaultMode": "default" pinned at the top of permissions
       - Allow: read-only commands + this stack's exact test/lint/typecheck/
         build commands + git add/commit/diff/status/log/update-index
@@ -170,6 +171,12 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         to the gate actions {block-await-human, auto-remediate,
         record-only} and embed it in audit.md — "CRITICAL/HIGH blocks" is
         undefined for linters that only emit error/warning.
+        SELF-HEALING FAILURE BRANCH: if an auto-remediation attempt
+        (MEDIUM/LOW) does not eliminate the finding on re-verify, treat
+        it as a hard block and report to the human — do not retry. Apply
+        the §3.3 three-strike rule to any auto-fix attempt: three failed
+        fix-and-re-verify cycles on the same finding → STOP, report
+        verbatim, await human.
       - review.md: ledger-aware pre-PR gate — recompute the FULL fingerprint
         (Guide §4.2, including untracked files) and compare against
         gate_state.json; SKIP loudly only on exact match, printing the
@@ -194,14 +201,19 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
             (git write-tree on the index being committed, via a temp
             index); pre-push matches git rev-parse 'HEAD^{tree}' against
             that key. Conflating the two makes pre-push block every
-            legitimate push.
+            legitimate push. In gate.sh use exactly these variable names:
+            WORKING_TREE_FP for the in-session ledger key and
+            COMMIT_TREE_FP for the receipt key used by pre-commit and
+            pre-push. Never assign both to the same variable.
           * SCAN TARGET in pre-commit context = the index tree, never the
             working tree (git commit -a / git add -p make them differ).
           * COLD START: if last_pass_sha is null, the change set is ALL
-            tracked + untracked files; on first pass set
-            last_pass_sha = HEAD. (git diff null..HEAD is a fatal error —
-            without this branch the gate crashes on the init verification
-            commit itself.)
+            tracked + untracked files. (git diff null..HEAD is a fatal
+            error — without this branch the gate crashes on the init
+            verification commit itself.) Write last_pass_sha = HEAD ONLY
+            after all gate checks complete with exit 0. If any check blocks
+            the commit, leave last_pass_sha as null so the next run takes
+            the all-files cold-start path again — never write it on entry.
           * Audit + review checks with the severity normalization table.
           * Test execution: full suite until the 60s threshold; record
             full-suite wall time and emit TIER TRANSITION REQUIRED per
@@ -234,6 +246,14 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
             commit time than profile in production.
           * Atomic receipt writes (write tmp + rename) to gate_state.json.
           * GATE REPORT emission to stdout.
+          * CRASH GUARD: if gate.sh exits for any reason other than a
+            deliberate gate block (missing dependency, scripting error,
+            unexpected exception), the pre-commit hook must treat the
+            result as a block — never as a pass. Emit gate.sh's stderr
+            verbatim and refuse the commit. Implement as: run gate.sh;
+            capture exit code; any non-zero exit is a block regardless
+            of cause. Never use a specific exit-code check that would
+            silently pass on an unexpected crash code.
       - .githooks/pre-commit:
           * if SKIP_GATE is set: apply Guide §4.3 K1 — deny-first, then
             confirmation + reason via read -p from /dev/tty (a human-

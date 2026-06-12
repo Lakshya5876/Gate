@@ -282,6 +282,10 @@ this mechanically.
       "Write(.claude/settings.json)", "Edit(.claude/settings.json)",
       "Write(.claude/baseline.json)", "Edit(.claude/baseline.json)",
       "Write(CLAUDE.md)", "Edit(CLAUDE.md)",
+      "Write(v1_claude_code_development_guide_new.md)",
+      "Edit(v1_claude_code_development_guide_new.md)",
+      "Write(v1_implementation_package_new.md)",
+      "Edit(v1_implementation_package_new.md)",
       "Bash(git notes*remove*)", "Bash(git update-ref -d*)",
       "Bash(git config core.hooksPath*)", "Bash(git config --add core.hooksPath*)",
       "Bash(git commit -a*)", "Bash(git commit -am*)", "Bash(git commit --amend*)"

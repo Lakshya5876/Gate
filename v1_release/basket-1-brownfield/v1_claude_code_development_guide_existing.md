@@ -280,6 +280,10 @@ Anything not in the allow list prompts; anything in the deny list is blocked out
       "Write(.claude/settings.json)", "Edit(.claude/settings.json)",
       "Write(.claude/baseline.json)", "Edit(.claude/baseline.json)",
       "Write(CLAUDE.md)", "Edit(CLAUDE.md)",
+      "Write(v1_claude_code_development_guide_existing.md)",
+      "Edit(v1_claude_code_development_guide_existing.md)",
+      "Write(v1_implementation_package_existing.md)",
+      "Edit(v1_implementation_package_existing.md)",
       "Bash(git notes*remove*)", "Bash(git update-ref -d*)",
       "Bash(git config core.hooksPath*)", "Bash(git config --add core.hooksPath*)",
       "Bash(git commit -a*)", "Bash(git commit -am*)", "Bash(git commit --amend*)"

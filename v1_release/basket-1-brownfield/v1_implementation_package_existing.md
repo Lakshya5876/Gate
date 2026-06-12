@@ -148,8 +148,12 @@ Execute in this exact order, cheapest first, and respect the budget caps:
       - Run the repo's linter, type checker, and (if available for the
         stack) security scanner.
       - For EVERY finding record: file, rule id, line, and a finding
-        fingerprint — a hash of the normalized code tokens surrounding the
-        finding (stable across line shifts, unique per defect).
+        fingerprint. FINGERPRINT ALGORITHM: hash the tuple
+        (normalized_file_path, rule_id, floor(line/5)*5) — bucketed line
+        for shift stability. Do NOT re-read source files to compute
+        fingerprints; derive them from scanner output only. This keeps
+        fingerprint computation O(1) per finding regardless of finding
+        count and prevents context inflation on large finding sets.
       - For every debt category with NO available scanner, record the
         category as NO_SCANNER — absence must be loud, not silent.
       - Run the test suite in collection-only mode; record total test count,
@@ -296,6 +300,14 @@ questions)
         auto-remediate, record-only} and embed it in audit.md. Without
         it, "CRITICAL/HIGH blocks" is undefined for linters that only
         emit error/warning, and the agent guesses.
+        SELF-HEALING FAILURE BRANCH: if an auto-remediation attempt
+        (MEDIUM/LOW) does not eliminate the finding on re-verify, treat
+        it as a hard block and report to the human — do not attempt a
+        second auto-fix. An auto-fix that fails once is a signal the
+        finding requires human judgement, not a retry loop.
+        Apply the §3.3 three-strike rule to any auto-fix attempt: three
+        failed fix-and-re-verify cycles on the same finding → STOP,
+        report verbatim, await human.
       - review.md: ledger-aware pre-PR gate — recompute the FULL fingerprint
         (Guide §4.2.3, including untracked files) and compare against
         gate_state.json; SKIP loudly only on exact match, printing the
@@ -323,15 +335,20 @@ questions)
             (git write-tree on the index being committed, via a temp
             index); pre-push matches git rev-parse 'HEAD^{tree}' against
             that key. Conflating the two makes pre-push block every
-            legitimate push.
+            legitimate push. In gate.sh use exactly these variable names:
+            WORKING_TREE_FP for the in-session ledger key and
+            COMMIT_TREE_FP for the receipt key used by pre-commit and
+            pre-push. Never assign both to the same variable.
           * SCAN TARGET in pre-commit context = the index tree (what is
             actually being committed), never the working tree — git
             commit -a and git add -p partial staging make them differ.
           * COLD START: if last_pass_sha is null, the change set is ALL
-            tracked files + untracked files; on first pass set
-            last_pass_sha = HEAD. (git diff null..HEAD is a fatal error —
-            without this branch the gate crashes on the init verification
-            commit itself.)
+            tracked files + untracked files. (git diff null..HEAD is a
+            fatal error — without this branch the gate crashes on the init
+            verification commit itself.) Write last_pass_sha = HEAD ONLY
+            after all gate checks complete with exit 0. If any check blocks
+            the commit, leave last_pass_sha as null so the next run takes
+            the all-files cold-start path again — never write it on entry.
           * Scoped audit (hunk intersection + identity ratchet + severity
             normalization table).
           * TIER-2 ALGORITHM: query the installed test-impact tool with
@@ -367,6 +384,14 @@ questions)
             commit time than profile in production.
           * Atomic receipt writes (write tmp + rename) to gate_state.json.
           * GATE REPORT emission to stdout.
+          * CRASH GUARD: if gate.sh exits for any reason other than a
+            deliberate gate block (missing dependency, scripting error,
+            unexpected exception), the pre-commit hook must treat the
+            result as a block — never as a pass. Emit gate.sh's stderr
+            verbatim and refuse the commit. Implement as: run gate.sh;
+            capture exit code; any non-zero exit is a block regardless
+            of cause. Never use a specific exit-code check that would
+            silently pass on an unexpected crash code.
       - .githooks/pre-commit:
           * if SKIP_GATE is set: apply Guide §4.4 K1 — deny-first, then
             confirmation + reason via read -p from /dev/tty (a human-
