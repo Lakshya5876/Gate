@@ -444,13 +444,16 @@ questions)
       .claude/gate_state.json
       .claude/checkpoints/
 
-  C8. .team_aliases at the repository root: write APPENDIX B of this document
-      VERBATIM, substituting only the <source-dirs> placeholder with this
-      repo's confirmed source and test directories (from the discovery
-      report). If a placeholder has no confirmed value, ask — never guess.
-      Beyond that substitution the file is byte-identical to Appendix B.
-      Do not invent, add, or omit functions — security-relevant shell is
-      never generated from memory.
+  C8. .team_aliases at the repository root: write APPENDIX B of this init
+      package (the section headed "APPENDIX B — CANONICAL .team_aliases"
+      at the bottom of this prompt) VERBATIM, substituting only the
+      <source-dirs> placeholder with this repo's confirmed source and test
+      directories (from the discovery report). If a placeholder has no
+      confirmed value, ask — never guess. Beyond that substitution the file
+      is byte-identical to Appendix B. Do not invent, add, or omit functions —
+      security-relevant shell is never generated from memory. Do NOT look for
+      Appendix B in v1_claude_code_development_guide_existing.md — it is not
+      there. The appendix lives at the bottom of this init package.
 
 PHASE D — VERIFICATION AND MANIFEST
 

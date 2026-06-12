@@ -315,12 +315,15 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
       - README.md: project name placeholder, quickstart including
         `cc-init-hooks`, and a pointer to CLAUDE.md as the constitution
 
-  B8. .team_aliases at the root: write APPENDIX B of this document VERBATIM,
-      substituting only the <source-dirs> placeholder with the scaffold's
-      source and test directories (e.g. "src/ tests/", or the stack idiom
-      chosen in B1). Beyond that substitution the file is byte-identical to
-      Appendix B. Do not invent, add, or omit functions — security-relevant
-      shell is never generated from memory.
+  B8. .team_aliases at the root: write APPENDIX B of this init package
+      (the section headed "APPENDIX B — CANONICAL .team_aliases" at the
+      bottom of this prompt) VERBATIM, substituting only the <source-dirs>
+      placeholder with the scaffold's source and test directories (e.g.
+      "src/ tests/", or the stack idiom chosen in B1). Beyond that
+      substitution the file is byte-identical to Appendix B. Do not invent,
+      add, or omit functions — security-relevant shell is never generated
+      from memory. Do NOT look for Appendix B in v1_claude_code_development_guide_new.md —
+      it is not there. The appendix lives at the bottom of this init package.
 
 PHASE C — VERIFICATION AND MANIFEST
 
