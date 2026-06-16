@@ -335,6 +335,140 @@ P3. FORCE-PUSH: the deny list catches the named flag variants, but
 
 ---
 
+# SECTION 2.5 — COGNITIVE ROUTING, GRAPH MEMORY & BRANCH ENFORCEMENT
+
+These rules fire **before** every task — before any file read, before the pipeline, before any tool call. They are entry gates, not suggestions.
+
+---
+
+## 2.5.1 Gitflow Branch Enforcement (fires first — before anything else)
+
+**Branch validation — mandatory on every task:**
+
+1. Read current branch: `git branch --show-current`
+2. If branch is `main`, `master`, or `develop`: **HARD BLOCK**
+   - Output exactly: `BRANCH BLOCK: Direct work on protected branch '[branch]' is forbidden. Create a feature/bugfix/hotfix/release branch first.`
+   - Zero execution. Zero file reads. Stop entirely.
+3. Extract prefix (everything before the first `/`). If prefix does not match `feature|bugfix|hotfix|release`: emit one-line warning, then require explicit user acknowledgement before continuing.
+
+**Dynamic graph strategy by branch prefix — read this table before the first graph call:**
+
+| Branch prefix | Strategy name | Permitted graph tools | Max depth |
+|---|---|---|---|
+| `feature/` | BROAD | All 5 tools; call `get_architecture_overview_tool` first | Full graph |
+| `bugfix/` | NARROW | `get_impact_radius_tool` + `query_graph_tool` only; no architecture overview | 2 hops max |
+| `hotfix/` | ULTRA-NARROW | `get_impact_radius_tool` only; single target symbol | 1 hop |
+| `release/` | DIFF-ONLY | `get_review_context_tool` only; no code writes permitted | Diff surface |
+
+**After determining strategy, state it before the first tool call:**
+`Branch: bugfix/fix-auth-token → Strategy: NARROW. Max 2 hops. Architecture overview suppressed.`
+
+---
+
+## 2.5.2 Cognitive Routing — Model Intercept
+
+**Classify every task before any execution:**
+
+| Tier | Applies to | Recommended model |
+|---|---|---|
+| LOW | Formatting, single-file test, comment edit, rename | Haiku |
+| MEDIUM | Standard feature, multi-file edit, bug fix with side effects | Sonnet |
+| HIGH | Architecture decision, cross-layer refactor, new system design, security change | Opus |
+
+**Ambiguity rule:** when classification is unclear between two tiers, always round up.
+
+**LOW-tier tasks:** proceed immediately — no menu, no pause.
+
+**MEDIUM or HIGH tasks — or when `token_spent_today` ≥ 60% of `TOKEN_BUDGET`:** stop and output the Execution Mode Menu (§2.5.3). Zero execution until user replies.
+
+---
+
+## 2.5.3 Execution Mode Menu (HALT & ASK upgrade)
+
+**When triggered (MEDIUM/HIGH tier, or budget ≥ 60%), output this block verbatim — no prose, no paraphrasing:**
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EXECUTION MODE REQUIRED
+Classification: [Tier] | Model: [Model]
+Token budget used: [X]% of daily limit
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+[1] DIRECT — Single context, self-reviewed
+    Cost: 1x | Quality: standard
+    Best for: contained features, clear scope
+
+[2] SUBAGENT — Isolated contexts, independent verification gates
+    Cost: 3–5x | Quality: highest
+    Best for: architecture, security changes, cross-system refactors
+    ⚠ WARNING if budget < 40%: subagent flow may hit hard block mid-run
+
+[3] HYBRID — Isolated implementation, in-thread review
+    Cost: 2x | Quality: high
+    Best for: medium complexity requiring an independent review gate
+
+Reply with 1, 2, or 3.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**Enforcement rules:**
+- Hard stop after outputting the menu — zero execution until integer reply received
+- No fallback: do not assume Option 1. Do not proceed on ambiguous replies.
+- If Option 2 selected AND `token_spent_today` > 60%: output a second confirmation block noting the subagent flow risk before proceeding
+- Write selected mode + classification + budget % + timestamp to `.claude/session_state.json` immediately after approval
+
+---
+
+## 2.5.4 Graph Memory Protocol
+
+**Prerequisite check (run once per session, before first exploration):**
+- If `.mcp.json` exists in project root AND `code-review-graph status` returns healthy: **graph-first mode active**
+- If absent or unhealthy: fall back to standard grep/Read workflow + emit one-line advisory: `Graph inactive — falling back to grep/Read. Run install.sh to enable.`
+
+**Multi-domain graph scope:**
+The graph indexes these domains as first-class nodes — not just application code:
+
+| Domain | File patterns |
+|---|---|
+| Application code | `*.py`, `*.ts`, `*.tsx`, `*.js`, `*.go`, `*.rs`, `*.java` |
+| SQL / migrations | `*.sql`, `migrations/**` |
+| ORM models | `models/**`, `*model*`, `*schema*` |
+| Infrastructure | `Dockerfile*`, `docker-compose*.yml`, `*.tf`, `*.hcl` |
+| CI/CD | `.github/workflows/*.yml`, `.circleci/config.yml` |
+| Proxy/gateway | `nginx.conf`, `*.conf` |
+| Env contracts | `.env.example` |
+
+This means a blast-radius query on a DB column returns: the migration file, the ORM model, the API route, the env variable, and the Dockerfile ENV instruction — as one unified impact set.
+
+**Named tool mandate — exact usage rules:**
+
+| Tool | When to call | Must not replace with |
+|---|---|---|
+| `get_architecture_overview_tool` | First call on any new session; any `feature/` branch task | Reading README for orientation |
+| `semantic_search_nodes_tool` | Any keyword/symbol lookup across the codebase | `grep -r`, `rg`, directory scans |
+| `get_impact_radius_tool` | Before touching ANY file — scope blast radius first | Speculative file reads |
+| `query_graph_tool` | Finding callers, callees, imports, test coverage, inheritors | `grep -n <symbol>`, manual tracing |
+| `get_review_context_tool` | PR review, `release/` branch work, post-feature diff analysis | `git diff`, reading full changed files |
+
+**Mandatory sequence before any edit:**
+1. `get_impact_radius_tool(<target_symbol>)` — what breaks?
+2. `query_graph_tool(<target_symbol>)` — who calls this, what does it import, which tests cover it?
+3. Load ONLY the specific nodes returned — never load the containing file in full
+
+---
+
+## 2.5.5 Context Diet Rules
+
+These rules apply at all times, regardless of graph availability:
+
+- **Never `cat` any file.** Use the `Read` tool with explicit `limit` and `offset` parameters.
+- **Max 150 lines per file load** unless a hard stop explicitly justifies more; state the justification inline.
+- **`semantic_search_nodes_tool` replaces all broad grep** when graph is active.
+- **When graph is inactive:** use `grep -n` or `rg` for symbol lookups — never directory-wide `cat`.
+- **Flush on completion:** final output line of every task: `Task complete. Run /clear to flush session context.`
+
+---
+
 # SECTION 3 — THE AGENTIC PIPELINE
 
 ## 3.1 Workspace Scanning — Token-Efficient Navigation

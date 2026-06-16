@@ -1,0 +1,70 @@
+{
+  "_comment": "Claude Code gate ledger — managed by gate.sh and CLAUDE.md. Do NOT hand-edit.",
+
+  "last_pass_sha": null,
+  "last_pass_timestamp": null,
+
+  "thresholds": {
+    "coverage_pct": 80,
+    "complexity_max": 10,
+    "command_timeout_sec": 30,
+    "git_cache_ttl_sec": 60
+  },
+
+  "token": {
+    "_comment": "token_budget is READ from ~/.claude/org_policy.json first. Value here is repo-level ceiling and must be <= org ceiling.",
+    "token_budget": 50000,
+    "token_spent_today": 0,
+    "token_last_reset": null,
+    "token_audit_log": []
+  },
+
+  "mcp_graph": {
+    "config_path": ".mcp.json",
+    "last_build_timestamp": null,
+    "node_count": 0,
+    "included_domains": [
+      "application_code",
+      "sql_migrations",
+      "orm_models",
+      "infrastructure",
+      "ci_cd",
+      "proxy_config",
+      "env_contracts"
+    ]
+  },
+
+  "branch_strategy": {
+    "feature": {
+      "strategy_name": "BROAD",
+      "max_hops": null,
+      "tools_permitted": ["get_architecture_overview_tool", "semantic_search_nodes_tool", "get_impact_radius_tool", "query_graph_tool", "get_review_context_tool"],
+      "architecture_overview_required": true
+    },
+    "bugfix": {
+      "strategy_name": "NARROW",
+      "max_hops": 2,
+      "tools_permitted": ["get_impact_radius_tool", "query_graph_tool"],
+      "architecture_overview_required": false
+    },
+    "hotfix": {
+      "strategy_name": "ULTRA-NARROW",
+      "max_hops": 1,
+      "tools_permitted": ["get_impact_radius_tool"],
+      "architecture_overview_required": false
+    },
+    "release": {
+      "strategy_name": "DIFF-ONLY",
+      "max_hops": null,
+      "tools_permitted": ["get_review_context_tool"],
+      "architecture_overview_required": false,
+      "code_writes_permitted": false
+    }
+  },
+
+  "execution_mode_log": [],
+
+  "session_state_path": ".claude/session_state.json",
+
+  "receipts": {}
+}
