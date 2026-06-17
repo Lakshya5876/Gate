@@ -19,9 +19,9 @@ agentic engineering environment — without blocking on pre-existing debt.
 > [!CAUTION]
 > ## V1 STRUCTURAL CEILING — MANDATORY PRE-CHECK BEFORE INITIALIZATION
 >
-> **This V1 Brownfield Reconnaissance Package enforces a hard ceiling of ≤ 200,000 Lines of Code (LOC).**
+> **This V1 Brownfield Reconnaissance Package enforces a hard ceiling of ≤ 1,000,000 Lines of Code (1M LOC) (LOC).**
 >
-> It is optimized for standard single-root applications and microservices. Above 200k LOC, the automated
+> It is optimized for standard single-root applications and microservices. Above 1M LOC, the automated
 > repository reconnaissance phase causes **severe context window inflation and performance degradation**
 > during initial scanning. Projects exceeding this threshold are not supported in V1 and must wait for
 > the **V2 Enterprise Monorepo Release**.
@@ -49,8 +49,8 @@ agentic engineering environment — without blocking on pre-existing debt.
 >
 > | Result | Action |
 > |---|---|
-> | ≤ 200,000 LOC | Proceed to STEP 1 below |
-> | > 200,000 LOC | **STOP. Do not proceed.** This repository exceeds the V1 ceiling. Halt initialization and wait for the V2 Enterprise Monorepo release. |
+> | ≤ 1,000,000 LOC (1M) | Proceed to STEP 1 below |
+> | > 1,000,000 LOC (1M) | **STOP. Do not proceed.** This repository exceeds the V1 ceiling. Halt initialization and wait for the V2 Enterprise Monorepo release. |
 >
 > Do not skip this check. Do not estimate. Run the command, read the number, then decide.
 

@@ -791,10 +791,23 @@ This means a blast-radius query on a DB column returns: the migration file, the 
 | `query_graph_tool` | Finding callers, callees, imports, test coverage, inheritors | `grep -n <symbol>`, manual tracing |
 | `get_review_context_tool` | PR review, `release/` branch work, post-feature diff analysis | `git diff`, reading full changed files |
 
+**Result size limits (CRITICAL at 1M+ LOC):**
+
+Graph queries on heavily-imported utilities (logger, config, utils) can return thousands of edges. Without limits, a single query consumes all remaining token budget. **MANDATORY:**
+
+- If a graph query returns >50 results: fetch first 10 only. Ask the tool to prioritize by import frequency or graph depth. Paginate if needed.
+- If a single node has >100 edges (transitive callers/callees): query direct callers only (depth 1). Do NOT fetch the full closure.
+- If `query_graph_tool` returns >50 edges, stop immediately and narrow your search:
+  - Specify file patterns: `query_graph_tool(logger, in_files="app/services/**")`
+  - Limit depth: `query_graph_tool(logger, max_depth=1)` (direct calls only)
+  - Filter by type: `query_graph_tool(logger, node_types=["FunctionDef"])`
+  - Never fetch all 5,000 results "just to see"
+
 **Mandatory sequence before any edit:**
-1. `get_impact_radius_tool(<target_symbol>)` — what breaks?
-2. `query_graph_tool(<target_symbol>)` — who calls this, what does it import, which tests cover it?
-3. Load ONLY the specific nodes returned — never load the containing file in full
+1. `get_impact_radius_tool(<target_symbol>)` — what breaks? (respects depth limit automatically)
+2. `query_graph_tool(<target_symbol>)` — who calls this, what does it import, which tests cover it? **If >50 results: narrow your query before continuing.**
+3. Load ONLY the specific nodes returned (max 20 files) — never load the containing file in full
+4. If edge count is suspicious (e.g., 500+ callers for a utility), the query result is itself the finding: "this node is too central, refactor is needed." Do not attempt to load all 500 callers.
 
 ---
 

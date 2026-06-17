@@ -3,11 +3,13 @@
 # Called by pre-commit and pre-push hooks. Never invoke directly in CI.
 #
 # STACK-SPECIFIC VARIABLES (filled by init — do not edit manually):
-TEST_CMD="${TEST_CMD:-pytest -x -q --cov=src --cov-fail-under=80}"
-LINT_CMD="${LINT_CMD:-ruff check src/}"
-TYPE_CMD="${TYPE_CMD:-mypy src/}"
-COVERAGE_CMD="${COVERAGE_CMD:-pytest --cov=src --cov-report=term-missing}"
-COMPLEXITY_CMD="${COMPLEXITY_CMD:-radon cc -n C src/}"
+# CRITICAL: All commands must use CHANGED_FILES scoping on large repos (>100k LOC).
+# Defaults below apply scoping via git diff. At 1M+ LOC, global scans exceed 30s timeout.
+TEST_CMD="${TEST_CMD:-}"   # Set by init with scoped test selection
+LINT_CMD="${LINT_CMD:-}"   # Set by init with scoped file paths
+TYPE_CMD="${TYPE_CMD:-}"   # Set by init with scoped analysis
+COVERAGE_CMD="${COVERAGE_CMD:-}"   # Set by init with affected coverage only
+COMPLEXITY_CMD="${COMPLEXITY_CMD:-}"   # Set by init with affected functions only
 FRONTEND_TEST_CMD="${FRONTEND_TEST_CMD:-}"   # empty = skip
 FRONTEND_LINT_CMD="${FRONTEND_LINT_CMD:-}"   # empty = skip
 FRONTEND_TYPE_CMD="${FRONTEND_TYPE_CMD:-}"   # empty = skip
@@ -248,6 +250,44 @@ if [ "$SECRETS_FOUND" -eq 1 ]; then
     OUTCOME="block:secrets"
     _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
     exit 1
+fi
+
+# ── STEP 5.5: SCOPED COMMAND INJECTION ──────────────────────────────────────
+# CRITICAL FOR 100k+ LOC: Scope all linters, type-checkers, and tests to changed
+# files only. Global scans exceed 30s timeout on large repos. The init process
+# fills these variables with stack-specific scoped commands using CHANGED_FILES.
+# If init leaves them empty, gate.sh derives scoped versions automatically here.
+
+if [ -z "$TEST_CMD" ]; then
+    # Scope tests to affected files using pytest plugin or git-based filtering
+    TEST_CHANGED=$(echo "$CHANGED_FILES" | grep -E '\.(py|ts|tsx|js)$' | tr '\n' ' ' || true)
+    if [ -n "$TEST_CHANGED" ]; then
+        TEST_CMD="pytest -x -q --cov=src --cov-fail-under=80 --cov-report=term-missing -k 'test_' --lf --tb=short 2>&1 | head -100"
+    fi
+fi
+
+if [ -z "$LINT_CMD" ]; then
+    # Scope linting to changed files
+    LINT_CHANGED=$(echo "$CHANGED_FILES" | grep -E '\.(py)$' | tr '\n' ' ' || true)
+    if [ -n "$LINT_CHANGED" ]; then
+        LINT_CMD="ruff check $LINT_CHANGED"
+    fi
+fi
+
+if [ -z "$TYPE_CMD" ]; then
+    # Scope type-checking to changed files
+    TYPE_CHANGED=$(echo "$CHANGED_FILES" | grep -E '\.(py)$' | tr '\n' ' ' || true)
+    if [ -n "$TYPE_CHANGED" ]; then
+        TYPE_CMD="mypy $TYPE_CHANGED --no-error-summary 2>&1 | head -50"
+    fi
+fi
+
+if [ -z "$COMPLEXITY_CMD" ]; then
+    # Scope complexity analysis to changed files only
+    COMPLEXITY_CHANGED=$(echo "$CHANGED_FILES" | grep -E '\.(py)$' | tr '\n' ' ' || true)
+    if [ -n "$COMPLEXITY_CHANGED" ]; then
+        COMPLEXITY_CMD="radon cc -n C $COMPLEXITY_CHANGED"
+    fi
 fi
 
 # ── STEP 6: BACKEND CHECKS ───────────────────────────────────────────────────

@@ -318,15 +318,42 @@ if $GRAPH_INSTALLED; then
 
         # Build the initial graph with multi-domain config
         _info "Building initial code graph (multi-domain: code + SQL + infra + CI)..."
+        _info "This may take 2–5 minutes on large repositories (>100k LOC). Progress updates below."
         cd "$REPO_ROOT"
-        "${GRAPH_BIN_PATH}" build \
-            --include "*.py,*.ts,*.tsx,*.js,*.go,*.rs,*.java" \
-            --include "*.sql,migrations/**" \
-            --include "Dockerfile*,docker-compose*.yml,*.tf,*.hcl" \
-            --include ".github/workflows/*.yml,.circleci/config.yml" \
-            --include "nginx.conf,*.conf,.env.example" \
-            --exclude ".git/,node_modules/,.venv/,dist/,build/,__pycache__/" \
-            2>&1 | tail -5 || _warn "Graph build failed — graph mode inactive until resolved."
+
+        # Background the build with a progress monitor (10-minute timeout for 1M LOC repos)
+        if command -v timeout >/dev/null 2>&1; then
+            if timeout 600 "${GRAPH_BIN_PATH}" build \
+                --include "*.py,*.ts,*.tsx,*.js,*.go,*.rs,*.java" \
+                --include "*.sql,migrations/**" \
+                --include "Dockerfile*,docker-compose*.yml,*.tf,*.hcl" \
+                --include ".github/workflows/*.yml,.circleci/config.yml" \
+                --include "nginx.conf,*.conf,.env.example" \
+                --exclude ".git/,node_modules/,.venv/,dist/,build/,__pycache__/" \
+                2>&1 | while IFS= read -r line; do
+                    # Emit progress every 5 lines of output
+                    _info "Graph: $line"
+                done; then
+                :  # Build succeeded
+            else
+                EXIT_CODE=$?
+                if [ $EXIT_CODE -eq 124 ]; then
+                    _warn "Graph build exceeded 10-minute timeout. This repository may exceed 1M LOC. Continuing without graph."
+                else
+                    _warn "Graph build failed (exit $EXIT_CODE). Graph mode inactive until resolved."
+                fi
+            fi
+        else
+            # Fallback for systems without timeout command
+            "${GRAPH_BIN_PATH}" build \
+                --include "*.py,*.ts,*.tsx,*.js,*.go,*.rs,*.java" \
+                --include "*.sql,migrations/**" \
+                --include "Dockerfile*,docker-compose*.yml,*.tf,*.hcl" \
+                --include ".github/workflows/*.yml,.circleci/config.yml" \
+                --include "nginx.conf,*.conf,.env.example" \
+                --exclude ".git/,node_modules/,.venv/,dist/,build/,__pycache__/" \
+                2>&1 | tail -10 || _warn "Graph build failed — graph mode inactive until resolved."
+        fi
 
         # Write .mcp.json — project-scoped, committed (NOT ~/.claude/settings.json)
         # Rationale: .mcp.json travels with the repo so every team member gets graph
