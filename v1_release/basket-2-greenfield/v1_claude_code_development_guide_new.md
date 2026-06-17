@@ -29,6 +29,347 @@
 
 ---
 
+# SECTION 0 — GETTING STARTED
+
+## What Is This?
+
+Claude Code is an autonomous execution engine for software development. Unlike conversational AI assistants, it operates under a strict contract system: you specify *what must be true when done* (the objective), not *what steps to take*. The engine then reads your codebase, designs the implementation, applies changes, runs tests, and delivers results — all in one self-correcting loop.
+
+This framework sits on top of Claude Code and standardises that execution. It provides:
+
+- A **constitution** (CLAUDE.md) that codifies your architecture, naming contracts, and security rules once — then enforces them automatically on every task
+- A **stateful gate system** that tracks quality ratchets and prevents regressions
+- A **skill command pipeline** (/feature, /audit, /review, /prep) that automate the entire development workflow
+- A **worktree isolation layer** so multiple engineers can run parallel agentic sessions without stepping on each other
+
+**Expected reading time for this section: 8 minutes.**  
+**Setup time: 5 minutes.**  
+**Your first feature: 10 minutes (including git push confirmation).**
+
+---
+
+## Installation at a Glance
+
+```bash
+# 1. Clone/enter your repository
+cd your-repository
+
+# 2. Run the init script (copies .claude/ and .githooks/ into place)
+curl -s https://your-company/installer/claude-code-init.sh | bash
+
+# 3. Verify the installation
+git config core.hooksPath .githooks
+ls -la .claude/settings.json .claude/commands/ CLAUDE.md
+
+# 4. Activate hooks in this clone
+cc-init-hooks  # alias for: git config core.hooksPath .githooks
+```
+
+**What got installed:**
+
+| Directory | Purpose | Committed? |
+|---|---|---|
+| `.claude/settings.json` | Permission boundaries (what tools require confirmation) | ✓ Yes |
+| `.claude/baseline.json` (brownfield only) | Frozen debt identities — the ratchet (see §4.3) | ✓ Yes |
+| `.claude/gate_state.json` | Gate receipt ledger — tracks each commit's quality score | ✗ .gitignored |
+| `.claude/checkpoints/` | Session snapshots (memory, context usage) | ✗ .gitignored |
+| `.claude/commands/` | Skill command modules (/feature, /audit, /review, /prep) | ✓ Yes |
+| `.githooks/pre-commit` | THE GATE — runs /audit and /review on every commit | ✓ Yes |
+| `.githooks/pre-push` | Push gate — validates receipt, enforces bypass deadline | ✓ Yes |
+| `CLAUDE.md` | Constitution — architecture + naming + security rules | ✓ Yes |
+| `quarantine.txt` | Flaky test quarantine (team-wide) | ✓ Yes |
+
+Add to `.gitignore`:
+```
+.claude/gate_state.json
+.claude/checkpoints/
+```
+
+---
+
+## Glossary: 20 Key Terms
+
+<details>
+<summary><strong>Click to expand — 20 definitions you'll see everywhere</strong></summary>
+
+1. **Gate** — Automated enforcement rule that runs on `git commit` and `git push`. Prevents regression, security violations, and architectural drift before code ever leaves your machine.
+
+2. **Ledger** — The `.claude/gate_state.json` file tracking every commit's quality score. If a commit fails /audit with a HIGH severity finding, the ledger records it; that receipt is validated before push.
+
+3. **Fingerprint** — A hash of a file's content at a specific git commit. Used by the baseline ratchet to detect when a file was touched (and thus subject to full constitution enforcement).
+
+4. **Token** — A unit of input to the LLM. 1,000 tokens ≈ 750 words. Used to calculate budget and context overhead. See §7 for token accounting.
+
+5. **Token Budget** — The context window reserved for a single agentic task. Greenfield: 80k. Brownfield: 60k. Determines how many files can be read before context is exhausted.
+
+6. **Hard Block** — A rule in CLAUDE.md (Section 6) that always requires explicit human approval before Claude Code proceeds. Examples: new runtime dependency, auth/authz change, schema migration.
+
+7. **Graph** — The dependency graph of your codebase. `/audit` uses this to determine scope spillover when a file you edited is imported elsewhere (§3.2).
+
+8. **MCP** — Model Context Protocol. The standardized interface Claude Code uses to invoke tools (read, edit, execute bash, git, etc.) safely.
+
+9. **Blast Radius** — The set of all files affected by a change, including transitive imports. If you edit `auth.py` and 8 other files import it, the blast radius is 9 files.
+
+10. **SECTION 2.5** — Cognitive Routing, Graph Memory, Gitflow Enforcement. A new set of rules that fire on every task automatically. Devs must read this BEFORE invoking /feature.
+
+11. **Execution Mode Menu** — After `/feature` starts, you choose: "Stubs First" (skeleton then fill), "Guided" (one file at a time), or "Full Auto" (read-edit-test no pause). Different modes for different confidence levels.
+
+12. **Cognitive Routing** — The framework's ability to detect when a task spans multiple concerns (e.g., "add auth" touches models, services, routes, tests) and auto-partition the work into layers.
+
+13. **Gitflow** — The branch naming convention enforced by pre-commit hook. Must match: `feature/*`, `fix/*`, `docs/*`, `refactor/*`, `test/*`, or `chore/*`. Commits to `main` or `develop` are blocked unless in a PR.
+
+14. **Branch Prefix** — The leading keyword in your branch name. Examples: `feature/add-dashboard`, `fix/rate-limiter-off-by-one`, `docs/update-readme`. Automation uses this to infer commit type.
+
+15. **Cold Start** — First run of the framework in a new worktree. All memory is blank. The framework auto-generates a checkpoint after the first successful task (see §8).
+
+16. **SKIP_GATE** — Emergency environment variable (`SKIP_GATE=1 git commit`) that bypasses pre-commit hook. Allowed exactly ONCE per worktree; subsequent uses are blocked unless a human approves and resets the counter. Used only in emergencies.
+
+17. **Bypass** — Temporary suspension of a gate rule (e.g., "merge a hotfix with 1 test passing instead of 100"). Logged in the receipt; auto-expires after 24 hours; requires human approval on review.
+
+18. **Ref Notes** — Git annotations stored in `.git/refs/notes/` that log gate receipts. Not visible in commit history; queryable with `git log --notes`.
+
+19. **Pre-commit** — Hook that fires when you run `git commit`. Runs /audit and /review. If either fails with CRITICAL/HIGH, commit is blocked.
+
+20. **Pre-push** — Hook that fires when you run `git push`. Validates that you didn't skip the pre-commit gate, and enforces the SKIP_GATE bypass deadline (24 hours).
+
+</details>
+
+---
+
+## Day 1 Checklist — Post-Installation
+
+After running the init script, verify these three things before starting your first feature:
+
+```bash
+# 1. Hooks are wired
+git config core.hooksPath
+# Output should be: .githooks
+
+# 2. Constitution is readable
+cat CLAUDE.md | head -50
+# You should see the architecture, naming contracts, and hard stops
+
+# 3. Settings are permissive enough for your workflow
+cat .claude/settings.json | grep -A 20 '"allow"'
+# You should see your test runner, linter, and git commands
+# If anything is missing, add it via /update-config skill
+```
+
+Then, **create your first branch and make a trivial change:**
+
+```bash
+git checkout -b feature/day-1-test
+echo "# Day 1" >> README.md
+git add README.md
+git commit -m "feat: day 1 verification"
+```
+
+Expected outcome:
+- Commit succeeds (pre-commit hook runs, audit passes with no CRITICAL findings)
+- `git log --oneline` shows your new commit
+- `.claude/gate_state.json` now contains a receipt for this commit
+
+**If the commit fails:** Read the audit output carefully. Usually a missing permission in settings or a stray hard-stop violation.
+
+---
+
+## First Feature Walkthrough — Complete Example
+
+Let's walk through the entire lifecycle of a small feature: "Add email validation to signup endpoint."
+
+### Phase 1: Understand the Scope
+
+```bash
+# You're in a greenfield FastAPI project
+# Current branch: develop
+# Task: Add email validation to signup endpoint
+
+git checkout -b feature/email-validation
+```
+
+### Phase 2: Write the Execution Contract
+
+Before invoking `/feature`, think:
+
+- **SCOPE:** Which files will I touch? (`src/application/user_service.py`, `src/presentation/handlers/auth.py`, `tests/application/test_user_service.py`, `tests/presentation/test_auth.py`)
+- **OBJECTIVE:** What must be true when done? ("Signup endpoint rejects requests with invalid emails. Invalid email detection uses regex; valid emails pass. All existing tests pass.")
+- **CONSTRAINTS:** What rules apply? ("No external email validation APIs. No new dependencies.")
+- **VERIFY:** What command proves success? (`pytest tests/application/test_user_service.py tests/presentation/test_auth.py -v`)
+
+### Phase 3: Invoke /feature
+
+```bash
+/feature
+
+# Prompt text:
+#
+# Scope:   src/application/, src/presentation/handlers/auth.py, tests/
+# Objective: Email validation on signup endpoint. Rejects invalid addresses.
+#            Uses regex (no external APIs). All tests pass.
+# Constraints:
+#   - No new dependencies
+#   - Layer boundaries respected (validation in service, not handler)
+#   - Existing tests unmodified
+# Verify: pytest tests/application/ tests/presentation/ -v
+# Output: File summary, full test output, Conventional Commit message
+```
+
+### Phase 4: Execution Mode Menu
+
+The framework asks:
+
+```
+Which execution mode?
+
+  [1] Stubs First      Read architecture, create empty functions, ask before filling
+  [2] Guided           One file at a time, show diffs before edits
+  [3] Full Auto        Read, design, edit, test, fix — no pauses
+
+Your choice (1-3, default 2):
+```
+
+**Choose based on your confidence:**
+- **Stubs First** — You're new to the codebase or want to review the design first
+- **Guided** — Standard; you see each change before it lands
+- **Full Auto** — You know exactly what needs to happen; trust the engine
+
+(Let's choose Guided for this walkthrough.)
+
+### Phase 5: Implementation
+
+The framework:
+1. **Reads** your constitution, models, existing service and handler code
+2. **Designs** the validation function and integration point
+3. **Asks (if Guided):** "I'm adding `validate_email()` to `UserService`. Review?" — shows the diff
+4. **You reply:** "yes" → it commits the edit
+5. **Tests:** Runs `pytest tests/application/` → test fails (no test yet)
+6. **Fixes:** Creates test case, re-runs → test passes
+7. **Integrates:** Edits handler to call `UserService.validate_email()`, runs integration test
+8. **Verifies:** Full suite passes
+
+### Phase 6: Output
+
+```
+=== FEATURE COMPLETE ===
+
+Files Modified:
+  src/application/user_service.py       | +12 lines (validation function)
+  src/presentation/handlers/auth.py     | +2 lines (call validation)
+  tests/application/test_user_service.py | +8 lines (unit test)
+  tests/presentation/test_auth.py        | +6 lines (integration test)
+
+Test Output (full pytest -v):
+  test_user_service.py::test_valid_email PASSED
+  test_user_service.py::test_invalid_email PASSED
+  test_auth.py::test_signup_rejects_invalid_email PASSED
+  [all 87 tests in suite] PASSED
+
+Conventional Commit:
+  feat(auth): add email validation to signup endpoint
+  
+  Validates email format on signup. Rejects invalid addresses.
+  Uses regex pattern; no external APIs. All tests passing.
+```
+
+### Phase 7: Git Commit & Push
+
+```bash
+# Framework shows the commit message and asks
+# "Ready to commit?" → you reply "yes"
+
+git commit -m "feat(auth): add email validation to signup endpoint
+
+Validates email format on signup. Rejects invalid addresses.
+Uses regex pattern; no external APIs. All tests passing."
+
+# Pre-commit hook fires automatically:
+#   ✓ /audit (no CRITICAL/HIGH findings)
+#   ✓ /review (architecture clean, test coverage adequate)
+# Commit succeeds.
+
+# Now you push:
+git push -u origin feature/email-validation
+
+# Pre-push hook fires:
+#   ✓ Receipt validated (commit passed both gates)
+#   ✓ No SKIP_GATE bypasses pending
+# Push succeeds.
+
+# You open a PR; the CI gate runs one final time.
+```
+
+---
+
+## Command Quick Reference
+
+| Command | What It Does | When to Use |
+|---|---|---|
+| `/feature` | Full implementation pipeline (read → design → edit → test → commit) | Whenever you start a new feature or fix |
+| `/audit` | Security + architecture audit on changed files only | Run manually to check your work before commit |
+| `/review` | Pre-PR gate: test coverage, naming, layer boundaries | Run manually to prepare for merge |
+| `/prep` | Convert natural language task into execution contract | When you want help structuring a vague task |
+| `git commit` | Commit with auto-gates (pre-commit hook) | Always use; never skip with --no-verify |
+| `git push` | Push to remote with auto-gates (pre-push hook) | Always use; never skip |
+| `cc-init-hooks` | Activate the hooks in this clone | Run once after installing |
+| `cc-audit` | Alias for `/audit` | Same as /audit |
+| `cc-review` | Alias for `/review` | Same as /review |
+| `/loop <interval> <command>` | Run a command repeatedly (e.g. `/loop 5m /audit`) | For continuous integration tasks |
+| `/update-config` | Edit settings.json and .claude/ config | When you need to adjust permissions or add environment variables |
+
+---
+
+## Reading Path — Where to Go Next
+
+You are here: **SECTION 0 (Getting Started)** ← you just finished this.
+
+**Next:**
+
+1. **SECTION 1** (The Paradigm Shift) — 10 min read
+   - Understand the execution contract model
+   - See why it's faster and better than conversational chat
+
+2. **SECTION 2** (Enterprise Configuration) — 15 min read
+   - Deep dive into CLAUDE.md (your constitution)
+   - Understand settings.json and permission boundaries
+
+3. **SECTION 2.5** (Cognitive Routing, Graph Memory, Gitflow Enforcement) — **READ BEFORE /feature**
+   - These rules fire on every task automatically
+   - You must know them before invoking any skill command
+
+4. **SECTION 3** (The Agentic Pipeline) — 15 min read
+   - How /feature actually works internally
+   - Why tests run before commit
+   - How the engine self-corrects
+
+5. **SECTION 4** (The Stateful Layer) — 10 min read
+   - How checkpoints and gate receipts work
+   - The baseline ratchet (brownfield only)
+
+6. **Then:** Pick your workflow:
+   - **Just want to ship code?** → Jump to SECTION 10 (Quick Reference)
+   - **Building a new team?** → Read SECTION A (30-day Onboarding Path)
+   - **Managing legacy debt?** → SECTION 4.3 (Baseline Ratchet — brownfield only)
+   - **Optimizing for large test suites?** → SECTION 6 (Testing at Scale)
+
+---
+
+## First-Time Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| "git commit" blocks with audit error | Read the CLAUDE.md section cited in the error. Usually: wrong layer, missing test, or hard-stop violation. |
+| Permission prompt on every /feature invocation | Your tool is not in the allow list. Run `/update-config` and add it. |
+| Tests fail after /feature completes | This is expected sometimes. The framework reports it, shows output, and asks permission to iterate. Reply "yes" to fix. |
+| I want to skip the gate (emergency hotfix) | Use `SKIP_GATE=1 git commit`. Allowed once. Reset with `git config core.hooksPath ""` (then re-init with cc-init-hooks). 24-hour bypass window. |
+| My branch name doesn't match `feature/*` | Pre-commit hook enforces gitflow. Rename: `git branch -m feature/my-fix`. |
+| I deleted something by accident in /feature | Worktrees isolate changes. If the main worktree is clean, you can restart in a new worktree. See §8. |
+
+---
+
+
+
+---
+
 # SECTION 1 — THE PARADIGM SHIFT
 
 ## 1.1 Two Execution Models: One Correct, One Comfortable
@@ -1131,6 +1472,347 @@ scope lists are shared before starting. `.claude/gate_state.json` and
 
 ---
 
+# SECTION 0 — GETTING STARTED
+
+## What Is This?
+
+Claude Code is an autonomous execution engine for software development. Unlike conversational AI assistants, it operates under a strict contract system: you specify *what must be true when done* (the objective), not *what steps to take*. The engine then reads your codebase, designs the implementation, applies changes, runs tests, and delivers results — all in one self-correcting loop.
+
+This framework sits on top of Claude Code and standardises that execution. It provides:
+
+- A **constitution** (CLAUDE.md) that codifies your architecture, naming contracts, and security rules once — then enforces them automatically on every task
+- A **stateful gate system** that tracks quality ratchets and prevents regressions
+- A **skill command pipeline** (/feature, /audit, /review, /prep) that automate the entire development workflow
+- A **worktree isolation layer** so multiple engineers can run parallel agentic sessions without stepping on each other
+
+**Expected reading time for this section: 8 minutes.**  
+**Setup time: 5 minutes.**  
+**Your first feature: 10 minutes (including git push confirmation).**
+
+---
+
+## Installation at a Glance
+
+```bash
+# 1. Clone/enter your repository
+cd your-repository
+
+# 2. Run the init script (copies .claude/ and .githooks/ into place)
+curl -s https://your-company/installer/claude-code-init.sh | bash
+
+# 3. Verify the installation
+git config core.hooksPath .githooks
+ls -la .claude/settings.json .claude/commands/ CLAUDE.md
+
+# 4. Activate hooks in this clone
+cc-init-hooks  # alias for: git config core.hooksPath .githooks
+```
+
+**What got installed:**
+
+| Directory | Purpose | Committed? |
+|---|---|---|
+| `.claude/settings.json` | Permission boundaries (what tools require confirmation) | ✓ Yes |
+| `.claude/baseline.json` (brownfield only) | Frozen debt identities — the ratchet (see §4.3) | ✓ Yes |
+| `.claude/gate_state.json` | Gate receipt ledger — tracks each commit's quality score | ✗ .gitignored |
+| `.claude/checkpoints/` | Session snapshots (memory, context usage) | ✗ .gitignored |
+| `.claude/commands/` | Skill command modules (/feature, /audit, /review, /prep) | ✓ Yes |
+| `.githooks/pre-commit` | THE GATE — runs /audit and /review on every commit | ✓ Yes |
+| `.githooks/pre-push` | Push gate — validates receipt, enforces bypass deadline | ✓ Yes |
+| `CLAUDE.md` | Constitution — architecture + naming + security rules | ✓ Yes |
+| `quarantine.txt` | Flaky test quarantine (team-wide) | ✓ Yes |
+
+Add to `.gitignore`:
+```
+.claude/gate_state.json
+.claude/checkpoints/
+```
+
+---
+
+## Glossary: 20 Key Terms
+
+<details>
+<summary><strong>Click to expand — 20 definitions you'll see everywhere</strong></summary>
+
+1. **Gate** — Automated enforcement rule that runs on `git commit` and `git push`. Prevents regression, security violations, and architectural drift before code ever leaves your machine.
+
+2. **Ledger** — The `.claude/gate_state.json` file tracking every commit's quality score. If a commit fails /audit with a HIGH severity finding, the ledger records it; that receipt is validated before push.
+
+3. **Fingerprint** — A hash of a file's content at a specific git commit. Used by the baseline ratchet to detect when a file was touched (and thus subject to full constitution enforcement).
+
+4. **Token** — A unit of input to the LLM. 1,000 tokens ≈ 750 words. Used to calculate budget and context overhead. See §7 for token accounting.
+
+5. **Token Budget** — The context window reserved for a single agentic task. Greenfield: 80k. Brownfield: 60k. Determines how many files can be read before context is exhausted.
+
+6. **Hard Block** — A rule in CLAUDE.md (Section 6) that always requires explicit human approval before Claude Code proceeds. Examples: new runtime dependency, auth/authz change, schema migration.
+
+7. **Graph** — The dependency graph of your codebase. `/audit` uses this to determine scope spillover when a file you edited is imported elsewhere (§3.2).
+
+8. **MCP** — Model Context Protocol. The standardized interface Claude Code uses to invoke tools (read, edit, execute bash, git, etc.) safely.
+
+9. **Blast Radius** — The set of all files affected by a change, including transitive imports. If you edit `auth.py` and 8 other files import it, the blast radius is 9 files.
+
+10. **SECTION 2.5** — Cognitive Routing, Graph Memory, Gitflow Enforcement. A new set of rules that fire on every task automatically. Devs must read this BEFORE invoking /feature.
+
+11. **Execution Mode Menu** — After `/feature` starts, you choose: "Stubs First" (skeleton then fill), "Guided" (one file at a time), or "Full Auto" (read-edit-test no pause). Different modes for different confidence levels.
+
+12. **Cognitive Routing** — The framework's ability to detect when a task spans multiple concerns (e.g., "add auth" touches models, services, routes, tests) and auto-partition the work into layers.
+
+13. **Gitflow** — The branch naming convention enforced by pre-commit hook. Must match: `feature/*`, `fix/*`, `docs/*`, `refactor/*`, `test/*`, or `chore/*`. Commits to `main` or `develop` are blocked unless in a PR.
+
+14. **Branch Prefix** — The leading keyword in your branch name. Examples: `feature/add-dashboard`, `fix/rate-limiter-off-by-one`, `docs/update-readme`. Automation uses this to infer commit type.
+
+15. **Cold Start** — First run of the framework in a new worktree. All memory is blank. The framework auto-generates a checkpoint after the first successful task (see §8).
+
+16. **SKIP_GATE** — Emergency environment variable (`SKIP_GATE=1 git commit`) that bypasses pre-commit hook. Allowed exactly ONCE per worktree; subsequent uses are blocked unless a human approves and resets the counter. Used only in emergencies.
+
+17. **Bypass** — Temporary suspension of a gate rule (e.g., "merge a hotfix with 1 test passing instead of 100"). Logged in the receipt; auto-expires after 24 hours; requires human approval on review.
+
+18. **Ref Notes** — Git annotations stored in `.git/refs/notes/` that log gate receipts. Not visible in commit history; queryable with `git log --notes`.
+
+19. **Pre-commit** — Hook that fires when you run `git commit`. Runs /audit and /review. If either fails with CRITICAL/HIGH, commit is blocked.
+
+20. **Pre-push** — Hook that fires when you run `git push`. Validates that you didn't skip the pre-commit gate, and enforces the SKIP_GATE bypass deadline (24 hours).
+
+</details>
+
+---
+
+## Day 1 Checklist — Post-Installation
+
+After running the init script, verify these three things before starting your first feature:
+
+```bash
+# 1. Hooks are wired
+git config core.hooksPath
+# Output should be: .githooks
+
+# 2. Constitution is readable
+cat CLAUDE.md | head -50
+# You should see the architecture, naming contracts, and hard stops
+
+# 3. Settings are permissive enough for your workflow
+cat .claude/settings.json | grep -A 20 '"allow"'
+# You should see your test runner, linter, and git commands
+# If anything is missing, add it via /update-config skill
+```
+
+Then, **create your first branch and make a trivial change:**
+
+```bash
+git checkout -b feature/day-1-test
+echo "# Day 1" >> README.md
+git add README.md
+git commit -m "feat: day 1 verification"
+```
+
+Expected outcome:
+- Commit succeeds (pre-commit hook runs, audit passes with no CRITICAL findings)
+- `git log --oneline` shows your new commit
+- `.claude/gate_state.json` now contains a receipt for this commit
+
+**If the commit fails:** Read the audit output carefully. Usually a missing permission in settings or a stray hard-stop violation.
+
+---
+
+## First Feature Walkthrough — Complete Example
+
+Let's walk through the entire lifecycle of a small feature: "Add email validation to signup endpoint."
+
+### Phase 1: Understand the Scope
+
+```bash
+# You're in a greenfield FastAPI project
+# Current branch: develop
+# Task: Add email validation to signup endpoint
+
+git checkout -b feature/email-validation
+```
+
+### Phase 2: Write the Execution Contract
+
+Before invoking `/feature`, think:
+
+- **SCOPE:** Which files will I touch? (`src/application/user_service.py`, `src/presentation/handlers/auth.py`, `tests/application/test_user_service.py`, `tests/presentation/test_auth.py`)
+- **OBJECTIVE:** What must be true when done? ("Signup endpoint rejects requests with invalid emails. Invalid email detection uses regex; valid emails pass. All existing tests pass.")
+- **CONSTRAINTS:** What rules apply? ("No external email validation APIs. No new dependencies.")
+- **VERIFY:** What command proves success? (`pytest tests/application/test_user_service.py tests/presentation/test_auth.py -v`)
+
+### Phase 3: Invoke /feature
+
+```bash
+/feature
+
+# Prompt text:
+#
+# Scope:   src/application/, src/presentation/handlers/auth.py, tests/
+# Objective: Email validation on signup endpoint. Rejects invalid addresses.
+#            Uses regex (no external APIs). All tests pass.
+# Constraints:
+#   - No new dependencies
+#   - Layer boundaries respected (validation in service, not handler)
+#   - Existing tests unmodified
+# Verify: pytest tests/application/ tests/presentation/ -v
+# Output: File summary, full test output, Conventional Commit message
+```
+
+### Phase 4: Execution Mode Menu
+
+The framework asks:
+
+```
+Which execution mode?
+
+  [1] Stubs First      Read architecture, create empty functions, ask before filling
+  [2] Guided           One file at a time, show diffs before edits
+  [3] Full Auto        Read, design, edit, test, fix — no pauses
+
+Your choice (1-3, default 2):
+```
+
+**Choose based on your confidence:**
+- **Stubs First** — You're new to the codebase or want to review the design first
+- **Guided** — Standard; you see each change before it lands
+- **Full Auto** — You know exactly what needs to happen; trust the engine
+
+(Let's choose Guided for this walkthrough.)
+
+### Phase 5: Implementation
+
+The framework:
+1. **Reads** your constitution, models, existing service and handler code
+2. **Designs** the validation function and integration point
+3. **Asks (if Guided):** "I'm adding `validate_email()` to `UserService`. Review?" — shows the diff
+4. **You reply:** "yes" → it commits the edit
+5. **Tests:** Runs `pytest tests/application/` → test fails (no test yet)
+6. **Fixes:** Creates test case, re-runs → test passes
+7. **Integrates:** Edits handler to call `UserService.validate_email()`, runs integration test
+8. **Verifies:** Full suite passes
+
+### Phase 6: Output
+
+```
+=== FEATURE COMPLETE ===
+
+Files Modified:
+  src/application/user_service.py       | +12 lines (validation function)
+  src/presentation/handlers/auth.py     | +2 lines (call validation)
+  tests/application/test_user_service.py | +8 lines (unit test)
+  tests/presentation/test_auth.py        | +6 lines (integration test)
+
+Test Output (full pytest -v):
+  test_user_service.py::test_valid_email PASSED
+  test_user_service.py::test_invalid_email PASSED
+  test_auth.py::test_signup_rejects_invalid_email PASSED
+  [all 87 tests in suite] PASSED
+
+Conventional Commit:
+  feat(auth): add email validation to signup endpoint
+  
+  Validates email format on signup. Rejects invalid addresses.
+  Uses regex pattern; no external APIs. All tests passing.
+```
+
+### Phase 7: Git Commit & Push
+
+```bash
+# Framework shows the commit message and asks
+# "Ready to commit?" → you reply "yes"
+
+git commit -m "feat(auth): add email validation to signup endpoint
+
+Validates email format on signup. Rejects invalid addresses.
+Uses regex pattern; no external APIs. All tests passing."
+
+# Pre-commit hook fires automatically:
+#   ✓ /audit (no CRITICAL/HIGH findings)
+#   ✓ /review (architecture clean, test coverage adequate)
+# Commit succeeds.
+
+# Now you push:
+git push -u origin feature/email-validation
+
+# Pre-push hook fires:
+#   ✓ Receipt validated (commit passed both gates)
+#   ✓ No SKIP_GATE bypasses pending
+# Push succeeds.
+
+# You open a PR; the CI gate runs one final time.
+```
+
+---
+
+## Command Quick Reference
+
+| Command | What It Does | When to Use |
+|---|---|---|
+| `/feature` | Full implementation pipeline (read → design → edit → test → commit) | Whenever you start a new feature or fix |
+| `/audit` | Security + architecture audit on changed files only | Run manually to check your work before commit |
+| `/review` | Pre-PR gate: test coverage, naming, layer boundaries | Run manually to prepare for merge |
+| `/prep` | Convert natural language task into execution contract | When you want help structuring a vague task |
+| `git commit` | Commit with auto-gates (pre-commit hook) | Always use; never skip with --no-verify |
+| `git push` | Push to remote with auto-gates (pre-push hook) | Always use; never skip |
+| `cc-init-hooks` | Activate the hooks in this clone | Run once after installing |
+| `cc-audit` | Alias for `/audit` | Same as /audit |
+| `cc-review` | Alias for `/review` | Same as /review |
+| `/loop <interval> <command>` | Run a command repeatedly (e.g. `/loop 5m /audit`) | For continuous integration tasks |
+| `/update-config` | Edit settings.json and .claude/ config | When you need to adjust permissions or add environment variables |
+
+---
+
+## Reading Path — Where to Go Next
+
+You are here: **SECTION 0 (Getting Started)** ← you just finished this.
+
+**Next:**
+
+1. **SECTION 1** (The Paradigm Shift) — 10 min read
+   - Understand the execution contract model
+   - See why it's faster and better than conversational chat
+
+2. **SECTION 2** (Enterprise Configuration) — 15 min read
+   - Deep dive into CLAUDE.md (your constitution)
+   - Understand settings.json and permission boundaries
+
+3. **SECTION 2.5** (Cognitive Routing, Graph Memory, Gitflow Enforcement) — **READ BEFORE /feature**
+   - These rules fire on every task automatically
+   - You must know them before invoking any skill command
+
+4. **SECTION 3** (The Agentic Pipeline) — 15 min read
+   - How /feature actually works internally
+   - Why tests run before commit
+   - How the engine self-corrects
+
+5. **SECTION 4** (The Stateful Layer) — 10 min read
+   - How checkpoints and gate receipts work
+   - The baseline ratchet (brownfield only)
+
+6. **Then:** Pick your workflow:
+   - **Just want to ship code?** → Jump to SECTION 10 (Quick Reference)
+   - **Building a new team?** → Read SECTION A (30-day Onboarding Path)
+   - **Managing legacy debt?** → SECTION 4.3 (Baseline Ratchet — brownfield only)
+   - **Optimizing for large test suites?** → SECTION 6 (Testing at Scale)
+
+---
+
+## First-Time Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| "git commit" blocks with audit error | Read the CLAUDE.md section cited in the error. Usually: wrong layer, missing test, or hard-stop violation. |
+| Permission prompt on every /feature invocation | Your tool is not in the allow list. Run `/update-config` and add it. |
+| Tests fail after /feature completes | This is expected sometimes. The framework reports it, shows output, and asks permission to iterate. Reply "yes" to fix. |
+| I want to skip the gate (emergency hotfix) | Use `SKIP_GATE=1 git commit`. Allowed once. Reset with `git config core.hooksPath ""` (then re-init with cc-init-hooks). 24-hour bypass window. |
+| My branch name doesn't match `feature/*` | Pre-commit hook enforces gitflow. Rename: `git branch -m feature/my-fix`. |
+| I deleted something by accident in /feature | Worktrees isolate changes. If the main worktree is clean, you can restart in a new worktree. See §8. |
+
+---
+
+
+
+---
+
 # SECTION 10 — QUICK REFERENCE FIELD CARD
 
 ```
@@ -1309,3 +1991,422 @@ Notes on the appendix:
   that may not exist is how phantom workflows are born.
 - `cc-push` complements, never replaces, the pre-push hook and the Gate Step 4
   chat confirmation — three independent layers.
+
+
+---
+
+# APPENDIX C — TROUBLESHOOTING GUIDE
+
+## Q1: Graph Build Fails or Takes Too Long During install.sh
+
+**Problem Statement:**
+You run `install.sh` and it hangs on "Building initial code graph..." with no progress feedback. After several minutes, you assume it crashed and kill the process.
+
+**Root Cause:**
+`code-review-graph build` parses the full AST of your codebase and indexes it into an SQLite database. On large repositories (>100k LOC), this takes 2–5 minutes. Without progress output, the user has no way to know it's working.
+
+**Resolution:**
+1. Run the build manually with verbose output:
+   ```bash
+   code-review-graph build --verbose
+   ```
+2. Watch the live progress output (parsing files, building index, writing database).
+3. If it genuinely crashes (actual error, not timeout), check disk space:
+   ```bash
+   df -h
+   ```
+4. If disk space is full, free up space and re-run `install.sh`.
+
+**Prevention:**
+The `install.sh` script now emits progress messages every 10 seconds during the graph build. If you don't see any output for >30 seconds, the process likely crashed — check the error above the progress line.
+
+---
+
+## Q2: Pre-commit Hook Timeout — "Command Exceeded 30s"
+
+**Problem Statement:**
+You run `git commit` and immediately get a message: "⚠ TIMEOUT: 'pytest' exceeded 30s — killed and logged". Your commit is blocked.
+
+**Root Cause:**
+The `gate.sh` script has a `COMMAND_TIMEOUT` of 30 seconds (default). On a large repository, running the full test suite can easily exceed this. The timeout is global and applies to all checks.
+
+**Resolution:**
+1. First, confirm the test suite is actually slow:
+   ```bash
+   pytest -x --tb=short  # Run locally to measure actual time
+   ```
+2. If tests genuinely take >30s, the timeout is too short for your repo. Increase it:
+   ```bash
+   # Edit .claude/gate_state.json
+   jq '.thresholds.command_timeout_sec = 120' .claude/gate_state.json > .tmp && mv .tmp .claude/gate_state.json
+   ```
+3. Or, scope your tests to changed files only (see gate.sh §3):
+   ```bash
+   # In your pytest config, add:
+   # [tool:pytest]
+   # addopts = --collect-only | grep <changed-file-pattern>
+   ```
+4. Re-run the commit:
+   ```bash
+   git commit -m "..."
+   ```
+
+**Prevention:**
+Ensure your test framework is configured to run **only** tests affected by changed files. Use pytest `--lf` (last failed) or coverage-based test filtering.
+
+---
+
+## Q3: Token Budget Hard Block at 100%
+
+**Problem Statement:**
+You're mid-feature with `/feature` when the output stops and you see: "TOKEN HARD BLOCK — Org-wide daily budget exhausted. Spent: 200,000 / Budget: 200,000 tokens."
+
+**Root Cause:**
+The agentic task consumed all 200k tokens within the session. This happens when:
+- Large files are read multiple times (context not reused)
+- The agent iterates extensively (many failed attempts)
+- Conversation is verbose without checkpoint compression
+
+**Resolution:**
+1. **Immediate:** Create a checkpoint to preserve progress:
+   ```bash
+   cc-checkpoint
+   ```
+   This writes `.claude/checkpoints/LATEST.md` with your current state, git diff, and pending decisions.
+
+2. **Decision:** Choose one path:
+   - **A) Wait for daily reset:** The budget resets at 00:00 UTC (tomorrow). Come back then and resume from checkpoint.
+   - **B) Request emergency override:** Contact the platform team (or local admin) to raise the org budget temporarily:
+     ```bash
+     # Show them:
+     cat ~/.claude/org_policy.json | grep TOKEN_BUDGET
+     ```
+   - **C) Partial restart with narrower scope:** Start a fresh session, re-read the checkpoint, and complete the remaining 20% of work with a smaller feature scope.
+
+3. **Resume:** When budget resets, use the checkpoint to resume:
+   ```bash
+   # Claude Code will automatically load LATEST.md if it exists
+   /feature
+   # Paste your resume instruction from the checkpoint
+   ```
+
+**Prevention:**
+- Enable `/compact` when `token_spent_today` exceeds 70% (soft warning fires)
+- Write checkpoints before context limits (§7.2)
+- Avoid re-reading the same files by citing them in checkpoints
+- Scope features to ≤15 files per session (diminishing returns beyond that)
+
+---
+
+## Q4: SKIP_GATE TTY Rejection — "Bypass Reason Required"
+
+**Problem Statement:**
+You run `SKIP_GATE=1 git commit` (emergency hotfix bypass), but it rejects you: "Bypass Reason is Required. Aborting."
+
+**Root Cause:**
+The pre-commit hook enforces a **TTY guard** — bypasses must be typed interactively (not piped from a script or automation). This prevents non-interactive CI systems from silently bypassing gates.
+
+**Resolution:**
+1. Run the commit in an interactive terminal (not in a cronjob or piped shell):
+   ```bash
+   # GOOD (interactive):
+   ssh user@machine
+   cd repo
+   SKIP_GATE=1 git commit -m "..."
+   # Terminal prompts: "Bypass reason (required): "
+   # You type: "hotfix: critical production bug"
+   
+   # BAD (piped, non-interactive):
+   echo 'SKIP_GATE=1 git commit -m "..."' | ssh user@machine
+   # TTY guard blocks this
+   ```
+
+2. If you absolutely must bypass in CI, contact the platform team to temporarily disable the TTY guard (requires human approval):
+   ```bash
+   # This is never auto-allowed; requires a human PR
+   ```
+
+**Prevention:**
+- Always run `git commit` in an interactive shell
+- Document the bypass reason before committing (keep a record for audit)
+- Use the 24-hour bypass deadline window — the ref note auto-expires after 24 hours and must be approved on the PR
+
+---
+
+## Q5: Execution Mode Menu Confusion — Which Option to Choose?
+
+**Problem Statement:**
+The framework asks "Which execution mode? [1] DIRECT [2] SUBAGENT [3] HYBRID — Reply 1-3". You don't know which one is right.
+
+**Root Cause:**
+The three modes have different cost/quality tradeoffs, and the right choice depends on the task complexity and your confidence level.
+
+**Resolution:**
+Use this decision tree:
+
+```
+Does the task touch CORE_FILES (fundamental modules like auth, config, DI)?
+  ├─ YES, high risk: Choose [2] SUBAGENT
+  │     Cost: 3–5x tokens (independent verification gates)
+  │     Quality: highest
+  │     Example: "Refactor the dependency injection wiring"
+  │
+  └─ NO, standard feature:
+       Is token budget > 60% used?
+         ├─ YES: Choose [3] HYBRID
+         │       Cost: 2x tokens (isolated impl + in-thread review)
+         │       Quality: high
+         │       Example: "Add email validation endpoint" (mid-budget)
+         │
+         └─ NO, fresh budget: Choose [1] DIRECT
+               Cost: 1x tokens (single context, self-reviewed)
+               Quality: standard
+               Example: "Add logging to error handler" (simple, budget available)
+```
+
+**Prevention:**
+- Check CORE_FILES before invoking /feature:
+  ```bash
+  grep -E '^CORE_FILES' CLAUDE.md
+  ```
+- Monitor token spend before starting large features:
+  ```bash
+  jq '.token.token_spent_today' .claude/gate_state.json
+  ```
+
+---
+
+## Q6: Pre-push Block — "Cannot Push to main/master"
+
+**Problem Statement:**
+You run `git push` and immediately see: "PRE-PUSH BLOCK: Direct push to protected branch 'main' is forbidden. Open a PR."
+
+**Root Cause:**
+The pre-push hook enforces that all code changes go through code review (PR), never direct pushes. Protected branches are: `main`, `master`, `develop`, `production`, `release/*`.
+
+**Resolution:**
+1. If you're on a feature branch (correct), the block shouldn't happen. Check your current branch:
+   ```bash
+   git branch --show-current
+   ```
+
+2. If you're on a protected branch, create a feature branch:
+   ```bash
+   git checkout -b feature/my-feature
+   git cherry-pick <commits>  # OR git rebase develop
+   git push origin feature/my-feature
+   ```
+
+3. Open a PR from `feature/my-feature` → `develop` (never to `main` directly).
+
+4. Once the PR is approved and merged, the code lands on `develop` via the GitHub UI (not your direct push).
+
+**Prevention:**
+- Always start work on a feature branch: `git checkout -b feature/...`
+- Configure git to prevent accidental pushes to protected branches:
+  ```bash
+  git config push.default upstream  # Never pushes to unintended branch
+  ```
+
+---
+
+## Q7: Coverage Gate Failed — "Test Coverage Below 80%"
+
+**Problem Statement:**
+You run `/feature` and it fails with: "GATE BLOCK: tests/coverage failed. Coverage: 72%, threshold: 80%."
+
+**Root Cause:**
+New code you added is not covered by tests, or existing test files have been modified and their coverage dropped.
+
+**Resolution:**
+1. **Identify what's not covered:**
+   ```bash
+   pytest --cov=src --cov-report=html
+   # Open htmlcov/index.html in a browser — shows red lines (uncovered code)
+   ```
+
+2. **Write tests for the uncovered lines:**
+   - For each red line, ask: "What user action causes this code to execute?"
+   - Write a test that exercises that action
+   - Re-run: `pytest --cov=src`
+
+3. **Re-invoke /feature:**
+   ```bash
+   /feature
+   # Supply the same task description; it will re-run with full test coverage
+   ```
+
+**Prevention:**
+- Use `pytest --cov-report=term-missing` to see uncovered lines immediately
+- Write tests alongside code (not after) — coverage is easier to achieve in parallel
+- For complex branching (if/else), use `pytest-cov` branches mode: `--cov-branch`
+
+---
+
+## Q8: Complexity Check Failed — "Cyclomatic Complexity > 10"
+
+**Problem Statement:**
+Gate.sh reports: "GATE BLOCK: complexity exceeds threshold (cc > 10). Function my_function() has cc=14."
+
+**Root Cause:**
+Your function has nested conditionals, loops, or switch cases that make it hard to understand and test. Cyclomatic complexity (cc) measures the number of independent code paths.
+
+**Resolution:**
+1. **Identify the offending function:**
+   ```bash
+   radon cc -n C src/  # Lists all functions with cc > threshold
+   ```
+
+2. **Refactor to reduce complexity:**
+
+   **Pattern 1: Extract conditional blocks into helper functions**
+   ```python
+   # BEFORE (cc=12):
+   def process_order(order):
+       if order.type == 'digital':
+           if order.region == 'EU':
+               # 20 lines of logic
+           else:
+               # 20 lines of logic
+       else:
+           if order.region == 'EU':
+               # 20 lines of logic
+           else:
+               # 20 lines of logic
+   
+   # AFTER (cc=2 each):
+   def process_order(order):
+       if order.type == 'digital':
+           return handle_digital_order(order)
+       return handle_physical_order(order)
+   ```
+
+   **Pattern 2: Replace nested if with guard clauses**
+   ```python
+   # BEFORE (cc=8):
+   def validate(user):
+       if user.age >= 18:
+           if user.email:
+               if user.country != 'US':
+                   return True
+       return False
+   
+   # AFTER (cc=4):
+   def validate(user):
+       if user.age < 18: return False
+       if not user.email: return False
+       if user.country == 'US': return False
+       return True
+   ```
+
+3. **Re-run gate:**
+   ```bash
+   git commit -m "refactor: reduce cyclomatic complexity in process_order()"
+   ```
+
+**Prevention:**
+- Keep functions small (≤20 lines)
+- Use simple, flat control flow (early returns, no deep nesting)
+- Test each path separately — if you need >10 test cases, the function is too complex
+
+---
+
+## Q9: Layer Violation — "Presentation Layer Called Repository Directly"
+
+**Problem Statement:**
+Gate.sh reports: "GATE BLOCK: Layer violation in routes/auth.py. Routes must call services, not repositories."
+
+**Root Cause:**
+You called a repository function directly from a route handler, bypassing the application layer. This violates clean architecture.
+
+**Resolution:**
+1. **Understand the layer stack (from bottom to top):**
+   ```
+   Domain (models.py)       ← Pydantic data contracts, zero framework deps
+                   ↑
+   Infrastructure          ← Repositories (SQL), tool execution
+   (repositories/)
+                   ↑
+   Application             ← Business logic, orchestration, cache
+   (services/)
+                   ↑
+   Presentation            ← HTTP routes, request parsing, auth
+   (routes/)
+   ```
+
+2. **Fix the violation:**
+   - Move repository calls into the service layer
+   - Have the route call the service, which calls the repository
+
+   ```python
+   # BEFORE (wrong):
+   @app.get("/users/{user_id}")
+   async def get_user(user_id: int):
+       user = await kpi_repository.fetch_user(user_id)  # ✗ Repository called from route
+       return user
+   
+   # AFTER (correct):
+   @app.get("/users/{user_id}")
+   async def get_user(user_id: int):
+       user = await user_service.get_user(user_id)  # ✓ Service called from route
+       return user
+   
+   # In services/user_service.py:
+   async def get_user(user_id: int):
+       return await user_repository.fetch_user(user_id)  # ✓ Repository called from service
+   ```
+
+3. **Re-commit:**
+   ```bash
+   git commit -m "fix(arch): move repository call from routes to services layer"
+   ```
+
+**Prevention:**
+- Before writing code, identify which layer each function belongs in
+- Import only from the layer below: routes → services, services → repositories
+- CLAUDE.md §1 specifies these boundaries — read them before coding
+
+---
+
+## Q10: Session Spend.tmp Not Found — Is It Critical?
+
+**Problem Statement:**
+You see a debug message: "Warning: session_spend.tmp not found. Continuing with zero accumulation."
+
+**Root Cause:**
+The file `.claude/session_spend.tmp` is used to track token spend during a session, but it doesn't exist. This happens if:
+- It's the first task in the repo
+- It was manually deleted
+- A previous session crashed before writing it
+
+**Solution:**
+This is **not critical**. The gate.sh script defaults to zero accumulation and continues normally. The next task will create the file.
+
+**Is it safe to delete?**
+Yes. `.claude/session_spend.tmp` is:
+- Transient (per-session only)
+- In `.gitignore` (never committed)
+- Regenerated automatically
+
+**What you should NOT delete:**
+```bash
+# DO NOT DELETE:
+.claude/gate_state.json        # Contains ledger + thresholds
+.claude/commands/              # Runtime skill definitions
+.claude/settings.json          # Permission boundaries
+.claude/baseline.json          # (brownfield only) Debt ratchet
+.githooks/                     # Gate scripts
+
+# OK TO DELETE:
+.claude/session_spend.tmp      # Transient
+.claude/checkpoints/           # Old snapshots (keep LATEST.md)
+.claude/git_cache.json         # Cache (rebuilds automatically)
+```
+
+**Prevention:**
+Don't manually edit files in `.claude/` except for:
+- `settings.json` (via `/update-config` skill)
+- `gate_state.json` (via `jq`, not by hand)
+
+---
+

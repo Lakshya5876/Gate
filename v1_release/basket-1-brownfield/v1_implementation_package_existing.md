@@ -90,16 +90,82 @@ The init runs in TWO halves with a human checkpoint between them:
 
 ---------------------------------- PROMPT START ----------------------------------
 
-Read the file `v1_claude_code_development_guide_existing.md` in this repository's
-root. It is the engineering standard this initialization implements — internalize
+Read the file `claude_code_development_guide_new.md` in this repository's root
+(new projects) or `claude_code_development_guide_existing.md` (existing repos).
+It is the engineering standard this initialization implements — internalize
 Sections 2 (configuration), 4 (stateful layer + enforcement hooks), 5 (gates),
-and 6 (test tiers) before doing anything.
+6 (testing discipline), and SECTION 2.5 (cognitive routing + execution gates)
+before doing anything.
 
-You are initializing an EXISTING repository. The prime directive: the
-constitution you generate must DESCRIBE the architecture that actually exists in
-this codebase — never prescribe a textbook ideal that contradicts reality. Every
-rule you write will be enforced on every future task; a rule that doesn't match
-the repo creates permanent noise.
+CRITICAL: SECTION 2.5 rules are NON-NEGOTIABLE and fire on EVERY task in this
+governed repository, starting immediately after initialization:
+
+SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
+
+  2.5.1 — MODEL INTERCEPT (Cognitive Routing)
+    Every task triggers automated model selection logic BEFORE execution:
+    - Analyze task type: (architecture | security | performance | test | deploy)
+    - Route to appropriate model if available; fallback to primary if not
+    - This routing is NON-BYPASSING — the agent cannot override it
+    - Task routing decisions are logged in gate_state.json ledger
+
+  2.5.2 — EXECUTION MODE DECLARATION (Menu Gate)
+    Before ANY file is written, the agent MUST declare ONE of:
+      [ ] MUST OUTPUT: task is design/analysis/report — no code changes, only text
+      [ ] HARD STOP: task requires human approval before proceeding (new dep,
+          auth change, schema change, CORE_FILES edit, settings change)
+      [ ] EXECUTE: task is code change — proceed with full pipeline
+    Wrong declaration blocks the task. The agent cannot change mode mid-task.
+
+  2.5.3 — GRAPH MEMORY PROTOCOL (Tool Invocation Rules)
+    Every tool call is context-aware and logged:
+    - Read tools: logged once per file per session (avoid re-reads)
+    - Bash commands: cached stdout for 5-minute reuse window
+    - Edit/Write tools: require prior Read call (trust-root rule)
+    - Web/External tools: only after exhausting local codebase tools
+    - If tool call is repetitive (same call within 10 mins): STOP and analyze
+    - Graph memory (what the agent knows about the codebase) expires at
+      session boundary; new session = fresh recon
+
+  2.5.4 — GITFLOW BRANCH ENFORCEMENT (Hard Block on Protected Branches)
+    These rules are MECHANICAL, never conditional:
+    - BLOCK HARD: any git push to main / master / develop (pre-push hook refuses)
+    - BLOCK HARD: git commit on main / master / develop (feature branch mandate)
+    - Feature branch naming: feature/*, fix/*, docs/*, chore/* only
+    - Pre-push hook verifies branch protection BEFORE auth/network checks
+    - User cannot override; no --force, no --no-verify, no exceptions
+    - Protected-branch bypass requires human-authored PR + code review
+    - Protected branch = main, master, develop, production, release/*
+
+  2.5.5 — TOKEN HARNESS & COST AWARENESS (Hard Blocks at Budget Thresholds)
+    Token budgets are PER-TASK, non-negotiable:
+    - Task token budget: 200,000 tokens (default, specified in system prompt)
+    - Soft warning at 70% (140,000 tokens): agent must summarize & checkpoint
+    - Hard block at 100% (200,000 tokens): execution STOPS immediately
+    - History retransmission waste (repeated passages) hard block at 50%
+      - If retransmitted content exceeds 50% of budget, task halts
+    - When hard block fires: state what is known, what remains unfinished,
+      write all checkpoints, then exit (never continue on next token window)
+    - Token budget resets per task; cannot carry over or negotiate up
+    - Cost warnings MUST be emitted to user at 80%, 90%, 100%
+
+  2.5.6 — EXECUTION PIPELINE INVARIANTS (Always Fire, Never Bypass)
+    Every code-change task auto-triggers this pipeline without confirmation:
+    Step 1: RECON (read-only) — grep, locate, scope the change
+    Step 2: CONTRACT (internal) — SCOPE/OBJECTIVE/CONSTRAINTS/VERIFY/OUTPUT
+    Step 3: EXECUTE — write code, run tests, verify gates
+    Step 4: OUTPUT — change manifest, test results, commit message
+    
+    Hard stops within pipeline: new dependency, auth change, schema change,
+    CORE_FILES edit, settings change, permission-mode change, hook modification.
+    Agent states the hard stop, waits for human approval, cannot self-resolve.
+
+You are initializing a [NEW | EXISTING] repository. The prime directive: [the
+constitution you generate PRESCRIBES the ideal architecture | the constitution
+you generate DESCRIBES the architecture that actually exists]. Every rule you
+write will be enforced by mechanical gates and SECTION 2.5 cognitive routing
+on every future task. A rule that doesn't match the repo (new projects) or
+contradicts reality (existing projects) creates permanent noise.
 
 PHASE A — STAGED RECONNAISSANCE (READ-ONLY. Write NOTHING in this phase.)
 
