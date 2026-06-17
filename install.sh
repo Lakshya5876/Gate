@@ -21,7 +21,18 @@
 set -euo pipefail
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-REPO_URL="https://raw.githubusercontent.com/BankofLoyal/ai-dev-workflow/init_release"
+# Detect if we're running from inside the local clone; if so, use local files
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_package_existing.md" ]; then
+    # Running from local clone — use local files exclusively
+    REPO_URL="${SCRIPT_DIR}"
+    USE_LOCAL_FILES=true
+else
+    # Running remotely — use GitHub URLs
+    REPO_URL="https://raw.githubusercontent.com/BankofLoyal/ai-dev-workflow/init_release"
+    USE_LOCAL_FILES=false
+fi
+
 FRAMEWORK_VERSION="v1"
 GRAPH_PACKAGE="code-review-graph==2.3.6"
 ORG_POLICY_PATH="${HOME}/.claude/org_policy.json"
@@ -42,25 +53,28 @@ _require() {
 _fetch() {
     # Download a file from REPO_URL/$1 to $2
     local src="$1" dst="$2"
+
+    # If we're using local files, try local path first
+    if [ "$USE_LOCAL_FILES" = true ]; then
+        if [ -f "${REPO_URL}/${src}" ]; then
+            cp "${REPO_URL}/${src}" "$dst"
+            return 0
+        fi
+    fi
+
+    # Fall back to GitHub download
     if command -v curl >/dev/null 2>&1; then
-        curl -sSfL "${REPO_URL}/${src}" -o "$dst" || _error "Failed to download ${src}"
+        curl -sSfL "${REPO_URL}/${src}" -o "$dst" || _error "Failed to download ${src} from ${REPO_URL}/${src}"
     elif command -v wget >/dev/null 2>&1; then
         wget -qO "$dst" "${REPO_URL}/${src}" || _error "Failed to download ${src}"
     else
-        _error "curl or wget required for remote install. For local install, run from inside the ai-dev-workflow clone."
+        _error "curl or wget required. For local install, run from inside the ai-dev-workflow clone."
     fi
 }
 
 _fetch_or_local() {
-    # Use local file if running from inside the repo clone; else fetch from GitHub
-    local rel_path="$1" dst="$2"
-    local script_dir
-    script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-    if [ -f "${script_dir}/${rel_path}" ]; then
-        cp "${script_dir}/${rel_path}" "$dst"
-    else
-        _fetch "$rel_path" "$dst"
-    fi
+    # Alias for _fetch (now handles local files automatically)
+    _fetch "$@"
 }
 
 # ── STEP 0: Preflight checks ──────────────────────────────────────────────────
