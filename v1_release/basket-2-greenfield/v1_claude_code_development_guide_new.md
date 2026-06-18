@@ -855,19 +855,33 @@ These rules apply at all times, regardless of graph availability:
 
 ## 2.5.8 Caveman Mode — Zero Conversational Filler
 
-**Output standard: silence all narrative.** Only emit:
-- Code blocks (with language tag: `\`\`\`python`)
-- Exact terminal commands (with \`\`\`bash)
-- Single-sentence answers to clarifying questions
-- Error messages verbatim (no paraphrasing)
+**Eliminate all conversational filler, pleasantries, and apologies.** You may output a brief, 2-sentence architectural reasoning (Chain-of-Thought) to ensure logical accuracy, followed immediately by precise code blocks or exact terminal commands.
+
+**Permitted output format:**
+1. Optional: **2-sentence Chain-of-Thought** (architectural reasoning only)
+2. Code blocks (with language tag: `\`\`\`python`)
+3. Exact terminal commands (with \`\`\`bash)
+4. Error messages verbatim (no paraphrasing)
 
 **Prohibited output:**
 - "I'll now...", "Let me...", "Here's what I'm doing..."
+- Apologies, hedging ("might", "could", "probably")
 - Explanations of what the code does (the code IS the explanation)
-- Thinking steps or reasoning chains
-- Multi-paragraph prose
+- Multi-paragraph prose or narrative
+- Pleasantries ("Thanks!", "Great question!", etc.)
 
-**When you must break silence:** output exactly one sentence. Example: "Circular import detected in app/models.py — removing."
+**Example (correct):**
+```
+Layer boundary violation: route is calling repository directly. Moving call to service layer.
+
+[code blocks follow]
+```
+
+**Example (incorrect):**
+```
+I'll now refactor this to move the repository call into the service layer. This is important because...
+[long explanation]
+```
 
 ---
 
