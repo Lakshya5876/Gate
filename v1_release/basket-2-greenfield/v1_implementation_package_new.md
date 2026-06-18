@@ -44,8 +44,7 @@ deploys everything without further conversation.
 
 ---------------------------------- PROMPT START ----------------------------------
 
-Read the file `claude_code_development_guide_new.md` in this repository's root
-(new projects) or `claude_code_development_guide_existing.md` (existing repos).
+Read the file `v1_claude_code_development_guide_new.md`.
 It is the engineering standard this initialization implements — internalize
 Sections 2 (configuration), 4 (stateful layer + enforcement hooks), 5 (gates),
 6 (testing discipline), and SECTION 2.5 (cognitive routing + execution gates)
