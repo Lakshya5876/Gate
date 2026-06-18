@@ -28,9 +28,15 @@ fresh workspaces and scales with the project as it grows.
 | `v1_claude_code_development_guide_new.md` | The greenfield engineering constitution — copy this into your repo root as-is; the init prompt reads it from disk and Claude Code generates `CLAUDE.md` from it |
 | `v1_implementation_package_new.md` | The one-time init prompt — paste this into Claude Code to scaffold and govern your new project |
 
-## Onboarding Steps
+## Installation
 
-**Step 1 — Initialize a fresh workspace**
+**Step 1 — Clone ai-dev-workflow**
+```bash
+git clone <repository_url>
+cd ai-dev-workflow
+```
+
+**Step 2 — Initialize a fresh workspace**
 Create an empty directory for your new project and initialize a Git repository inside it:
 ```bash
 mkdir my-new-project && cd my-new-project
@@ -39,15 +45,22 @@ git checkout -b develop
 ```
 Do not add any files yet. The initialization package will scaffold the correct structure for you.
 
-**Step 2 — Copy the guide into your repository**
+**Step 3 — Run the installer**
+From within the ai-dev-workflow directory, run:
+```bash
+./install.sh
+```
+This will scaffold `.claude/`, `.githooks/`, and copy governance files into your new project.
+
+**Step 4 — Copy the guide into your repository**
 Copy `v1_claude_code_development_guide_new.md` into the root of your new repository,
 keeping the filename exactly as-is. The init prompt reads it from disk — Claude Code uses it
 to generate the `CLAUDE.md` constitution prescribing your four-layer architecture, naming
 contracts, security invariants, and enforcement rules from day one.
 
-**Step 3 — Execute the initialization package**
-Open Claude Code (CLI or Desktop app) inside your new repository. Paste the full contents
-of `v1_implementation_package_new.md` as your first message. Claude Code will automatically:
+**Step 5 — Execute the initialization package**
+Open Claude Code (CLI or Desktop app) inside your new repository. Locate the "SYSTEM PROMPT" section
+in `v1_implementation_package_new.md` and paste **ONLY THAT SECTION** as your first message. Claude Code will automatically:
 
 - Scaffold the four-layer directory structure:
   - `domain/` — pure data contracts and Pydantic models, zero framework dependencies
@@ -60,3 +73,11 @@ of `v1_implementation_package_new.md` as your first message. Claude Code will au
 
 After the init commit lands, your project has a fully governed, ideally structured foundation.
 Every feature you build from that point forward is enforced against the constitution automatically.
+
+## 🧪 Pre-Commit Testing (Opt-In)
+
+To keep your commits blazingly fast, global test suites (like `pytest` or `npm test`) are **skipped by default** during the pre-commit hook.
+
+* **To run tests:** You must explicitly pass the `--run-tests=true` flag in your commit message.
+  * *Example:* `git commit -m "feat: new user signup endpoint --run-tests=true"`
+* If you omit this flag, the gate will only run linting and formatting checks to preserve your momentum.

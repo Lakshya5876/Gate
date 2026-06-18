@@ -49,17 +49,43 @@ with your repository in V1. Contact the platform team for monorepo governance as
 | `v1_claude_code_development_guide_existing.md` | The engineering constitution — copy this into your repo root as-is; the init prompt reads it from disk and Claude Code generates `CLAUDE.md` from it |
 | `v1_implementation_package_existing.md` | The one-time init prompt — paste this into Claude Code to run automated repository reconnaissance |
 
-## Onboarding Steps
+## Installation
 
-**Step 1 — Verify LOC ceiling**
-Run the command above. Confirm your repo is under 1,000,000 LOC. If it is, continue.
+**Step 1 — Clone ai-dev-workflow**
+```bash
+git clone <repository_url>
+cd ai-dev-workflow
+```
 
-**Step 2 — Copy the guide into your repository**
+**Step 2 — Verify LOC ceiling (in your target repository)**
+Navigate to your target repository and run:
+```bash
+find . -type f \
+  -not -path "*/.git/*" \
+  -not -path "*/node_modules/*" \
+  -not -path "*/.venv/*" \
+  -not -path "*/__pycache__/*" \
+  -not -path "*/vendor/*" \
+  -not -path "*/dist/*" \
+  -not -path "*/build/*" \
+  -not -path "*/.next/*" \
+  | xargs wc -l 2>/dev/null | tail -1
+```
+Confirm your repo is under 1,000,000 LOC. If it is, continue.
+
+**Step 3 — Run the installer**
+From within the ai-dev-workflow directory, run:
+```bash
+./install.sh
+```
+This will scaffold `.claude/`, `.githooks/`, and copy governance files into your target repository.
+
+**Step 4 — Copy the guide into your repository**
 Copy `v1_claude_code_development_guide_existing.md` into the root of your target repository,
 keeping the filename exactly as-is. The init prompt reads it from disk — Claude Code uses it
 to generate the `CLAUDE.md` constitution tailored to your specific repository's architecture.
 
-**Step 3 — Execute the initialization package**
+**Step 5 — Execute the initialization package**
 Open Claude Code (CLI or Desktop app) inside your target repository. Create a new setup branch:
 ```bash
 git checkout -b chore/claude-init
@@ -71,3 +97,11 @@ freeze the current technical debt baseline, and wire all git hooks — one time,
 After the init commit lands, your repository is a governed, hook-enforced agentic engineering
 environment. Every subsequent session operates under the constitution and enforcement layer
 established during init.
+
+## 🧪 Pre-Commit Testing (Opt-In)
+
+To keep your commits blazingly fast, global test suites (like `pytest` or `npm test`) are **skipped by default** during the pre-commit hook.
+
+* **To run tests:** You must explicitly pass the `--run-tests=true` flag in your commit message.
+  * *Example:* `git commit -m "fix: corrected auth flow --run-tests=true"`
+* If you omit this flag, the gate will only run linting and formatting checks to preserve your momentum.

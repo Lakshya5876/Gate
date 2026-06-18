@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # install.sh — Claude Code governance framework installer
-# Usage: curl -sSL https://raw.githubusercontent.com/BankofLoyal/ai-dev-workflow/init_release/install.sh | bash
-# Or:    bash install.sh  (from a local clone)
+# Usage: ./install.sh  (must be run from within the cloned repository)
 #
 # What this does:
 #   1. Detects basket (greenfield vs brownfield) and validates preconditions
@@ -21,17 +20,12 @@
 set -euo pipefail
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-# Detect if we're running from inside the local clone; if so, use local files
+# Install must be run from within the cloned repository
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_package_existing.md" ]; then
-    # Running from local clone — use local files exclusively
-    REPO_URL="${SCRIPT_DIR}"
-    USE_LOCAL_FILES=true
-else
-    # Running remotely — use GitHub URLs
-    REPO_URL="https://raw.githubusercontent.com/BankofLoyal/ai-dev-workflow/init_release"
-    USE_LOCAL_FILES=false
+if [ ! -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_package_existing.md" ]; then
+    _error "This script must be run from within the ai-dev-workflow repository. Run: git clone <repo_url> && cd ai-dev-workflow && ./install.sh"
 fi
+REPO_DIR="${SCRIPT_DIR}"
 
 FRAMEWORK_VERSION="v1"
 GRAPH_PACKAGE="code-review-graph==2.3.6"
@@ -51,40 +45,15 @@ _require() {
 }
 
 _fetch() {
-    # Download a file from REPO_URL/$1 to $2
+    # Copy a file from the local REPO_DIR to $2
     local src="$1" dst="$2"
+    local src_path="${REPO_DIR}/${src}"
 
-    # If we're using local files, try local path first
-    if [ "$USE_LOCAL_FILES" = true ]; then
-        if [ -f "${REPO_URL}/${src}" ]; then
-            cp "${REPO_URL}/${src}" "$dst"
-            return 0
-        fi
+    if [ ! -f "$src_path" ]; then
+        _error "File not found: ${src_path}"
     fi
 
-    # Fall back to GitHub download with URL integrity check
-    local url="${REPO_URL}/${src}"
-    if command -v curl >/dev/null 2>&1; then
-        # Check if URL returns 404 before downloading
-        local http_code=$(curl -sI -w "%{http_code}" -o /dev/null "$url" 2>/dev/null || echo "000")
-        if [ "$http_code" = "404" ]; then
-            _error "URL returns 404: ${url}"
-        fi
-        curl -sSfL "$url" -o "$dst" || _error "Failed to download ${src} from ${url}"
-    elif command -v wget >/dev/null 2>&1; then
-        # wget check
-        if ! wget --spider -q "$url" 2>/dev/null; then
-            _error "URL returns 404 or is unreachable: ${url}"
-        fi
-        wget -qO "$dst" "$url" || _error "Failed to download ${src}"
-    else
-        _error "curl or wget required. For local install, run from inside the ai-dev-workflow clone."
-    fi
-}
-
-_fetch_or_local() {
-    # Alias for _fetch (now handles local files automatically)
-    _fetch "$@"
+    cp "$src_path" "$dst" || _error "Failed to copy ${src} to ${dst}"
 }
 
 # ── STEP 0: Preflight checks ──────────────────────────────────────────────────
@@ -153,8 +122,8 @@ else
     INIT_PKG_DST="v1_implementation_package_existing.md"
 fi
 
-_fetch_or_local "$DEV_GUIDE_SRC" "$DEV_GUIDE_DST"
-_fetch_or_local "$INIT_PKG_SRC" "$INIT_PKG_DST"
+_fetch "$DEV_GUIDE_SRC" "$DEV_GUIDE_DST"
+_fetch "$INIT_PKG_SRC" "$INIT_PKG_DST"
 _success "Dev guide copied: ${DEV_GUIDE_DST}"
 _success "Init package copied: ${INIT_PKG_DST}"
 
@@ -163,7 +132,7 @@ _info "Scaffolding .claude/ directory..."
 mkdir -p .claude/commands .claude/checkpoints
 
 # gate_state.json from template
-_fetch_or_local "templates/gate_state.json" ".claude/gate_state.json"
+_fetch "templates/gate_state.json" ".claude/gate_state.json"
 # Stamp today's date into token.token_last_reset
 python3 -c "
 import json
@@ -198,7 +167,7 @@ _info "Installing git hooks..."
 mkdir -p .githooks
 
 # gate.sh from template
-_fetch_or_local "templates/gate.sh" ".githooks/gate.sh"
+_fetch "templates/gate.sh" ".githooks/gate.sh"
 chmod +x .githooks/gate.sh
 
 # pre-commit hook

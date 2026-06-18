@@ -61,8 +61,16 @@ A working-tree fingerprint (tree hash + staged diff + unstaged diff + untracked 
 is computed at session start and matched at pre-push. If the fingerprint does not match, the
 push is blocked until the session ledger is reconciled.
 
+## 🧪 Pre-Commit Testing (Opt-In)
+
+To keep your commits blazingly fast, global test suites (like `pytest` or `npm test`) are **skipped by default** during the pre-commit hook.
+
+* **To run tests:** You must explicitly pass the `--run-tests=true` flag in your commit message.
+  * *Example:* `git commit -m "feat: added login logic --run-tests=true"`
+* If you omit this flag, the gate will only run linting and formatting checks to preserve your momentum.
+
 ## V1 Constraints
 
-- Brownfield basket: **≤ 200,000 LOC** per repository (see basket-1-brownfield README for the mandatory pre-check command)
+- Brownfield basket: **≤ 1,000,000 LOC (1M LOC Certified)** per repository (see basket-1-brownfield README for the mandatory pre-check command)
 - Greenfield basket: no LOC ceiling — designed for fresh projects
-- V2 Enterprise Monorepo release will lift the brownfield LOC ceiling and add hierarchical CLAUDE.md support
+- V2 Enterprise Monorepo release will add hierarchical CLAUDE.md support

@@ -26,6 +26,14 @@ ai-dev-workflow/
     └── basket-2-greenfield/     ← For teams starting brand-new projects
 ```
 
+## 🧪 Pre-Commit Testing (Opt-In)
+
+To keep your commits blazingly fast, global test suites (like `pytest` or `npm test`) are **skipped by default** during the pre-commit hook.
+
+* **To run tests:** You must explicitly pass the `--run-tests=true` flag in your commit message.
+  * *Example:* `git commit -m "feat: added login logic --run-tests=true"`
+* If you omit this flag, the gate will only run linting and formatting checks to preserve your momentum.
+
 ## Tooling Coverage
 
 | Tool | Status |
