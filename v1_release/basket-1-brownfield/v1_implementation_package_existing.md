@@ -343,7 +343,20 @@ questions)
         TIER 2 at the end, and checkpoint evaluation/writes at the phase
         boundaries defined in Guide §4.1.3, and COST-WARNING FIRING per
         Guide §7.1.1 (alert when a task iteration or phase exceeds ~40,000
-        context tokens or history-retransmission waste crosses 50%)
+        context tokens or history-retransmission waste crosses 50%).
+        PHASE 2 (Design Declaration): the agent must programmatically deduce
+        the testing architecture from repository roots (§6.0 Dynamic Stack
+        Inference) — inspect package.json, requirements.txt, pyproject.toml,
+        go.mod, or CI config; never assume a fixed runner. If a frontend or
+        proxy layer is present, declare Playwright E2E user journeys implicitly
+        (web-first async assertions, network contract checks) — zero prompts
+        seeking human instruction on test paths.
+        PHASE 3 (Implementation): execute all inferred test suites completely
+        autonomously using the deduced runner engine(s). When UI/routing/rendering
+        paths change, auto-generate and run Playwright specs (*.spec.ts or stack
+        equivalent). Sequence backend + E2E runners; both must exit 0. No
+        conversational filler or prompts asking the developer for test
+        specifications are permitted.
       - audit.md: diff-scoped via the gate script's change set (files changed
         since last_pass_sha + staged + unstaged + untracked; full-repo only on
         explicit request). For file-level scanners apply the HUNK-INTERSECTION
@@ -360,10 +373,13 @@ questions)
         re-anchor, do not block (Guide §4.3.2).
         SEVERITY NORMALIZATION TABLE: generate a mapping from each
         confirmed scanner's NATIVE levels (error/warning, E/W codes,
-        HIGH/MEDIUM/LOW) to the gate actions {block-await-human,
+        HIGH/MEDIUM/LOW) AND test-runner output formats (JUnit XML, JSON
+        reporters, Playwright HTML/matrix/JSON reporters, Go test -json,
+        pytest exit codes) to the gate actions {block-await-human,
         auto-remediate, record-only} and embed it in audit.md. Without
         it, "CRITICAL/HIGH blocks" is undefined for linters that only
-        emit error/warning, and the agent guesses.
+        emit error/warning, for test suites that emit structured reports
+        without severity labels, and the agent guesses.
         SELF-HEALING FAILURE BRANCH: if an auto-remediation attempt
         (MEDIUM/LOW) does not eliminate the finding on re-verify, treat
         it as a hard block and report to the human — do not attempt a

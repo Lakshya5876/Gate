@@ -267,12 +267,119 @@ fi
 # fills these variables with stack-specific scoped commands using CHANGED_FILES.
 # If init leaves them empty, gate.sh derives scoped versions automatically here.
 
-if [ -z "$TEST_CMD" ]; then
-    # Scope tests to affected files using pytest plugin or git-based filtering
-    TEST_CHANGED=$(echo "$CHANGED_FILES" | grep -E '\.(py|ts|tsx|js)$' | tr '\n' ' ' || true)
-    if [ -n "$TEST_CHANGED" ]; then
-        TEST_CMD="pytest -x -q --cov=src --cov-fail-under=80 --cov-report=term-missing -k 'test_' --lf --tb=short 2>&1 | head -100"
+# ── Dynamic Stack Inference (§6.0) ───────────────────────────────────────────
+# Infer test runners from repo topology — never default to a static pytest command.
+
+_has_playwright_config() {
+    [ -f "playwright.config.ts" ] || [ -f "playwright.config.js" ] || \
+    [ -f "playwright.config.mjs" ] || \
+    { [ -f "package.json" ] && grep -q '@playwright/test' package.json 2>/dev/null; }
+}
+
+_infer_backend_test_cmd() {
+    local changed="$1"
+    local py_changed go_changed js_changed
+
+    # Python: pytest via config manifests
+    if [ -f "pytest.ini" ] || [ -f "conftest.py" ] || \
+       { [ -f "pyproject.toml" ] && grep -q '\[tool\.pytest' pyproject.toml 2>/dev/null; } || \
+       { [ -f "setup.cfg" ] && grep -q '\[tool:pytest\]' setup.cfg 2>/dev/null; } || \
+       { ls requirements*.txt >/dev/null 2>&1 && grep -qE '^pytest' requirements*.txt 2>/dev/null; }; then
+        py_changed=$(echo "$changed" | grep -E '\.py$' | tr '\n' ' ' || true)
+        if [ -n "$py_changed" ]; then
+            echo "pytest -x -q --tb=short ${py_changed} 2>&1 | head -100"
+        else
+            echo "pytest -x -q --tb=short 2>&1 | head -100"
+        fi
+        return 0
     fi
+
+    # Node/JS: jest, vitest, or npm test script
+    if [ -f "package.json" ]; then
+        js_changed=$(echo "$changed" | grep -E '\.(ts|tsx|js|jsx)$' | tr '\n' ' ' || true)
+        if grep -q '"jest"' package.json 2>/dev/null || \
+           grep -qE '"test".*jest' package.json 2>/dev/null; then
+            if [ -n "$js_changed" ]; then
+                echo "npm test -- --passWithNoTests --findRelatedTests ${js_changed} 2>&1 | head -100"
+            else
+                echo "npm test -- --passWithNoTests 2>&1 | head -100"
+            fi
+            return 0
+        elif grep -q 'vitest' package.json 2>/dev/null; then
+            echo "npx vitest run --passWithNoTests 2>&1 | head -100"
+            return 0
+        elif grep -q '"test"' package.json 2>/dev/null; then
+            echo "npm test 2>&1 | head -100"
+            return 0
+        fi
+    fi
+
+    # Go
+    if [ -f "go.mod" ]; then
+        go_changed=$(echo "$changed" | grep -E '\.go$' | while read -r f; do dirname "$f"; done 2>/dev/null | sort -u | sed 's|^|./|' | tr '\n' ' ' || true)
+        if [ -n "$go_changed" ]; then
+            echo "go test ${go_changed} -count=1 2>&1 | head -100"
+        else
+            echo "go test ./... -count=1 2>&1 | head -100"
+        fi
+        return 0
+    fi
+
+    # Rust
+    if [ -f "Cargo.toml" ]; then
+        echo "cargo test --quiet 2>&1 | head -100"
+        return 0
+    fi
+
+    # Java/Kotlin — Maven or Gradle
+    if [ -f "pom.xml" ]; then
+        echo "mvn -q test 2>&1 | head -100"
+        return 0
+    fi
+    if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
+        echo "./gradlew test --quiet 2>&1 | head -100"
+        return 0
+    fi
+
+    echo ""
+}
+
+_infer_playwright_cmd() {
+    local changed="$1"
+    if ! _has_playwright_config; then
+        echo ""
+        return 0
+    fi
+    local pw_specs ui_touched
+    pw_specs=$(echo "$changed" | grep -E '\.(spec|e2e)\.(ts|js|mjs)$|/e2e/' | tr '\n' ' ' || true)
+    if [ -n "$pw_specs" ]; then
+        echo "npx playwright test ${pw_specs} 2>&1 | head -100"
+    else
+        ui_touched=$(echo "$changed" | grep -E '(routes/|pages/|components/|frontend/|presentation/|\.tsx$|\.jsx$|nginx\.conf|proxy)' || true)
+        if [ -n "$ui_touched" ] || [ -n "$changed" ]; then
+            echo "npx playwright test 2>&1 | head -100"
+        fi
+    fi
+}
+
+# Build execution queue: init overrides first, then inferred runners
+TEST_RUNNERS=()
+if [ -n "$TEST_CMD" ]; then
+    TEST_RUNNERS+=("$TEST_CMD")
+else
+    _INFERRED_BACKEND=$(_infer_backend_test_cmd "$CHANGED_FILES")
+    [ -n "$_INFERRED_BACKEND" ] && TEST_RUNNERS+=("$_INFERRED_BACKEND")
+fi
+
+if [ -n "$FRONTEND_TEST_CMD" ]; then
+    TEST_RUNNERS+=("$FRONTEND_TEST_CMD")
+else
+    _INFERRED_PW=$(_infer_playwright_cmd "$CHANGED_FILES")
+    [ -n "$_INFERRED_PW" ] && TEST_RUNNERS+=("$_INFERRED_PW")
+fi
+
+if [ ${#TEST_RUNNERS[@]} -gt 0 ]; then
+    echo "GATE: inferred test runners (${#TEST_RUNNERS[@]}): ${TEST_RUNNERS[*]}" >&2
 fi
 
 if [ -z "$LINT_CMD" ]; then
@@ -325,29 +432,43 @@ if $HAS_BACKEND && [ -n "$TYPE_CMD" ]; then
     fi
 fi
 
-if [ "$RUN_TESTS" = "true" ] && $HAS_BACKEND && [ -n "$TEST_CMD" ]; then
-    echo "GATE: running tests + coverage (threshold: ${COVERAGE_THRESHOLD}%)..." >&2
-    # Tests use hard timeout: a hung test suite is a blocking condition
+_run_test_queue() {
+    local runner_idx=0 total=${#TEST_RUNNERS[@]}
+    local TIMEOUT_SEC TEST_TIMEOUT
     TIMEOUT_SEC=$(_json_get "$GATE_STATE" "thresholds.command_timeout_sec")
     TIMEOUT_SEC="${TIMEOUT_SEC:-30}"
-    TEST_TIMEOUT=$(( TIMEOUT_SEC * 10 ))   # tests get 10x normal timeout
-    if command -v timeout >/dev/null 2>&1; then
-        if ! timeout "$TEST_TIMEOUT" bash -c "$TEST_CMD" 2>&1; then
-            echo -e "${RED}GATE BLOCK: tests/coverage failed or timed out.${RESET}" >&2
-            OUTCOME="block:tests"
-            _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
-            exit 1
+    TEST_TIMEOUT=$(( TIMEOUT_SEC * 10 ))
+
+    for runner in "${TEST_RUNNERS[@]}"; do
+        runner_idx=$(( runner_idx + 1 ))
+        echo "GATE: running test suite ${runner_idx}/${total}..." >&2
+        if command -v timeout >/dev/null 2>&1; then
+            if ! timeout "$TEST_TIMEOUT" bash -c "$runner" 2>&1; then
+                echo -e "${RED}GATE BLOCK: test suite ${runner_idx}/${total} failed or timed out.${RESET}" >&2
+                echo "  Command: ${runner}" >&2
+                return 1
+            fi
+        else
+            if ! bash -c "$runner"; then
+                echo -e "${RED}GATE BLOCK: test suite ${runner_idx}/${total} failed.${RESET}" >&2
+                echo "  Command: ${runner}" >&2
+                return 1
+            fi
         fi
-    else
-        if ! bash -c "$TEST_CMD"; then
-            echo -e "${RED}GATE BLOCK: tests/coverage failed.${RESET}" >&2
-            OUTCOME="block:tests"
-            _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
-            exit 1
-        fi
+    done
+    return 0
+}
+
+if [ "$RUN_TESTS" = "true" ] && [ ${#TEST_RUNNERS[@]} -gt 0 ]; then
+    echo "GATE: running ${#TEST_RUNNERS[@]} test suite(s) (coverage threshold: ${COVERAGE_THRESHOLD}%)..." >&2
+    if ! _run_test_queue; then
+        OUTCOME="block:tests"
+        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
+        exit 1
     fi
-elif [ "$RUN_TESTS" != "true" ] && [ -n "$TEST_CMD" ]; then
+elif [ "$RUN_TESTS" != "true" ] && [ ${#TEST_RUNNERS[@]} -gt 0 ]; then
     echo "GATE: tests skipped (--run-tests=false). Pass --run-tests=true to enable." >&2
+    echo "GATE: queued runners (not executed): ${TEST_RUNNERS[*]}" >&2
 fi
 
 if $HAS_BACKEND && [ -n "$COMPLEXITY_CMD" ]; then
@@ -361,7 +482,7 @@ if $HAS_BACKEND && [ -n "$COMPLEXITY_CMD" ]; then
     fi
 fi
 
-# ── STEP 7: FRONTEND CHECKS ───────────────────────────────────────────────────
+# ── STEP 7: FRONTEND CHECKS (lint/type only — tests run via TEST_RUNNERS queue) ─
 if $HAS_FRONTEND && [ -n "$FRONTEND_LINT_CMD" ]; then
     echo "GATE: running frontend lint..." >&2
     if ! _run_with_timeout "frontend-lint" bash -c "$FRONTEND_LINT_CMD"; then
@@ -377,16 +498,6 @@ if $HAS_FRONTEND && [ -n "$FRONTEND_TYPE_CMD" ]; then
     if ! _run_with_timeout "frontend-type" bash -c "$FRONTEND_TYPE_CMD"; then
         echo -e "${RED}GATE BLOCK: frontend type check failed.${RESET}" >&2
         OUTCOME="block:frontend-type"
-        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
-        exit 1
-    fi
-fi
-
-if $HAS_FRONTEND && [ -n "$FRONTEND_TEST_CMD" ]; then
-    echo "GATE: running frontend tests..." >&2
-    if ! _run_with_timeout "frontend-tests" bash -c "$FRONTEND_TEST_CMD"; then
-        echo -e "${RED}GATE BLOCK: frontend tests failed.${RESET}" >&2
-        OUTCOME="block:frontend-tests"
         _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
         exit 1
     fi

@@ -217,15 +217,28 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
   B4. .claude/commands/ — four files with this stack's real commands in every
       verification block:
       - feature.md: Phases 0–5 per Guide §3.2 — pre-flight, recon, design
-        declaration, stubs-first (mandatory at 3+ files), implementation in
-        strict layer order (Domain -> Infra -> App -> Presentation -> Tests),
+        declaration (Phase 2), stubs-first (mandatory at 3+ files), implementation
+        in strict layer order (Domain -> Infra -> App -> Presentation -> Tests),
         three-strike verification with the corrected index protocol before
         every re-run (git update-index -q --refresh; git diff --no-ext-diff —
         refresh reconciles stat metadata ONLY and must be paired with a
         content-level check), checkpoint evaluation at phase boundaries,
         full suite at the end (cheap while young), and COST-WARNING FIRING
         per Guide §7.1.1 (alert when a task iteration or phase exceeds ~40,000
-        context tokens or history-retransmission waste crosses 50%)
+        context tokens or history-retransmission waste crosses 50%).
+        PHASE 2 (Design Declaration): the agent must programmatically deduce
+        the testing architecture from repository roots (§6.0 Dynamic Stack
+        Inference) — inspect package.json, requirements.txt, pyproject.toml,
+        go.mod, or CI config; never assume a fixed runner. If a frontend or
+        proxy layer is present, declare Playwright E2E user journeys implicitly
+        (web-first async assertions, network contract checks) — zero prompts
+        seeking human instruction on test paths.
+        PHASE 3 (Implementation): execute all inferred test suites completely
+        autonomously using the deduced runner engine(s). When UI/routing/rendering
+        paths change, auto-generate and run Playwright specs (*.spec.ts or stack
+        equivalent). Sequence backend + E2E runners; both must exit 0. No
+        conversational filler or prompts asking the developer for test
+        specifications are permitted.
       - audit.md: scoped to the gate script's change set (changed + staged +
         unstaged + untracked files); greenfield rule: ANY finding blocks
         (CRITICAL/HIGH await human; MEDIUM/LOW auto-fix then re-verify);
@@ -233,9 +246,12 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         auth on routes, layer violations.
         SEVERITY NORMALIZATION TABLE: generate a mapping from each chosen
         scanner's NATIVE levels (error/warning, E/W codes, HIGH/MEDIUM/LOW)
-        to the gate actions {block-await-human, auto-remediate,
-        record-only} and embed it in audit.md — "CRITICAL/HIGH blocks" is
-        undefined for linters that only emit error/warning.
+        AND test-runner output formats (JUnit XML, JSON reporters, Playwright
+        HTML/matrix/JSON reporters, Go test -json, pytest exit codes) to the
+        gate actions {block-await-human, auto-remediate, record-only} and embed
+        it in audit.md — "CRITICAL/HIGH blocks" is undefined for linters that
+        only emit error/warning or for test suites that emit structured reports
+        without severity labels.
         SELF-HEALING FAILURE BRANCH: if an auto-remediation attempt
         (MEDIUM/LOW) does not eliminate the finding on re-verify, treat
         it as a hard block and report to the human — do not retry. Apply

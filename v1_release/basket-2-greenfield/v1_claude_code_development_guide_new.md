@@ -1392,12 +1392,39 @@ git diff main...HEAD --name-only                # every file explainable
 
 # SECTION 6 — TESTING DISCIPLINE
 
+## 6.0 Dynamic Stack Inference (Mandatory — No Hardcoded Runner)
+
+The agent MUST NOT assume a fixed test runner (pytest, jest, etc.). Before any
+test command is constructed, inspect repository roots and infer the active
+testing architecture programmatically:
+
+```
+INFERENCE ORDER (cheapest signal first):
+  package.json       → scripts.test, devDependencies (jest, vitest, @playwright/test)
+  pyproject.toml     → [tool.pytest], [tool.coverage]
+  requirements*.txt  → pytest, unittest, nose
+  go.mod             → go test ./...
+  Cargo.toml         → cargo test
+  pom.xml / build.gradle → mvn test / ./gradlew test
+  Makefile / justfile → test targets
+  CI config          → .github/workflows, .gitlab-ci.yml (ground truth for CI parity)
+```
+
+The inferred runner(s) are logged in the GATE REPORT. If multiple runners exist
+(e.g. backend unit tests + Playwright E2E), the pipeline sequences ALL of them
+and requires exit code 0 from each — never silently skip a suite.
+
+**Zero conversational filler:** the agent deduces test paths, scoping filters,
+and runner flags from the repo — never prompts the developer for test
+specifications, test file paths, or runner choice.
+
 ## 6.1 The Greenfield Advantage
 
 The naming contract (`tests/<layer>/test_<module>` mirroring `src/` exactly) is
 established at init and enforced by /review forever. The payoff: deterministic
 module→test mapping with zero tooling — Claude always knows exactly which tests
-cover a change.
+cover a change. Adapt the filename idiom to the stack (`*.spec.ts`, `*_test.go`,
+`*Test.java`) while preserving the mirror rule.
 
 ```
 RULES:
@@ -1408,9 +1435,33 @@ N2. Every Infrastructure implementation gets an integration test.
 N3. Mock at the Infrastructure interface. Never deeper.
 N4. The suite passes with exit code 0 before any task is complete.
 N5. Never modify a test to make it pass.
+N6. Runner selection is inferred (§6.0) — never hardcoded to a single stack.
 ```
 
-## 6.2 Scaling Rules (so the suite never becomes the brownfield problem)
+## 6.2 Browser / E2E Layer — Playwright (Implicit, Never Prompted)
+
+When the change set touches UI components, routing, frontend rendering paths,
+proxy/gateway config, or any user-visible behavior:
+
+```
+MANDATORY (handled implicitly by /feature — zero human prompts):
+  1. Detect Playwright presence: playwright.config.{ts,js,mjs} or
+     @playwright/test in package.json
+  2. If absent but a frontend/proxy layer exists: scaffold Playwright
+     (playwright.config.ts + e2e/ or tests/e2e/ directory) as part of
+     Phase 3 — not as a separate ask
+  3. Auto-generate a Playwright spec (*.spec.ts or stack equivalent)
+     covering browser-side actionability and network contracts
+  4. Use web-first async assertions (page.getByRole, expect(locator))
+  5. Execute via the inferred runner (npx playwright test) autonomously
+  6. Both unit/integration AND Playwright suites must exit 0 before commit
+```
+
+The pipeline NEVER asks the developer to write out test specifications,
+describe user journeys, or confirm E2E test paths — the agent derives them
+from the change manifest and layer assignment in Phase 2.
+
+## 6.3 Scaling Rules (so the suite never becomes the brownfield problem)
 
 While the suite is young, run it fully — it is cheap. Plan the tiers BEFORE they
 are needed:

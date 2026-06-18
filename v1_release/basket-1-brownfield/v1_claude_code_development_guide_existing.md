@@ -1699,13 +1699,64 @@ git diff main...HEAD --name-only                 # every file explainable
 > 30-minute gates, and 30-minute gates produce engineers who stop committing.
 > Test selection is tiered by scope; the full suite belongs to CI.
 
+## 6.0 Dynamic Stack Inference (Mandatory — No Hardcoded Runner)
+
+The agent MUST NOT assume a fixed test runner (pytest, jest, etc.). Before any
+test command is constructed, inspect repository roots and infer the active
+testing architecture programmatically:
+
+```
+INFERENCE ORDER (cheapest signal first):
+  package.json       → scripts.test, devDependencies (jest, vitest, @playwright/test)
+  pyproject.toml     → [tool.pytest], [tool.coverage]
+  requirements*.txt  → pytest, unittest, nose
+  go.mod             → go test ./...
+  Cargo.toml         → cargo test
+  pom.xml / build.gradle → mvn test / ./gradlew test
+  Makefile / justfile → test targets
+  CI config          → .github/workflows, .gitlab-ci.yml (ground truth for CI parity)
+```
+
+The inferred runner(s) are logged in the GATE REPORT. If multiple runners exist
+(e.g. backend unit tests + Playwright E2E), the pipeline sequences ALL of them
+and requires exit code 0 from each — never silently skip a suite.
+
+**Zero conversational filler:** the agent deduces test paths, scoping filters,
+and runner flags from the repo — never prompts the developer for test
+specifications, test file paths, or runner choice.
+
+## 6.1 Browser / E2E Layer — Playwright (Implicit, Never Prompted)
+
+When the change set touches UI components, routing, frontend rendering paths,
+proxy/gateway config, or any user-visible behavior:
+
+```
+MANDATORY (handled implicitly by /feature — zero human prompts):
+  1. Detect Playwright presence: playwright.config.{ts,js,mjs} or
+     @playwright/test in package.json
+  2. If absent but a frontend/proxy layer exists: scaffold Playwright
+     (playwright.config.ts + e2e/ or tests/e2e/ directory) as part of
+     Phase 3 — not as a separate ask
+  3. Auto-generate a Playwright spec (*.spec.ts or stack equivalent)
+     covering browser-side actionability and network contracts
+  4. Use web-first async assertions (page.getByRole, expect(locator))
+  5. Execute via the inferred runner (npx playwright test) autonomously
+  6. Both unit/integration AND Playwright suites must exit 0 before commit
+```
+
+The pipeline NEVER asks the developer to write out test specifications,
+describe user journeys, or confirm E2E test paths — the agent derives them
+from the change manifest and layer assignment in Phase 2.
+
+## 6.2 Three-Tier Selection
+
 ```
 TIER 1 — per-file (during /feature Phase 3, after each file):
   Run ONLY the test file(s) mapped to the modified module.
   Mapping source, in order of preference:
     a. Naming contract (tests/<layer>/test_<module>) if the repo has one
-    b. Test-impact tooling (pytest-testmon, jest --changedSince,
-       go test ./changed/..., bazel rdeps queries)
+    b. Test-impact tooling (stack-specific: pytest-testmon, jest --changedSince,
+       vitest related, go test ./changed/..., bazel rdeps queries)
     c. Import-graph reverse lookup (grep) — a LOWER BOUND only, see T5
   Typical cost: seconds.
 
