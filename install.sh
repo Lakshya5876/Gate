@@ -20,10 +20,10 @@
 set -euo pipefail
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-# Install must be run from within the cloned repository
+# Locate the ai-dev-workflow framework directory
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ ! -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_package_existing.md" ]; then
-    _error "This script must be run from within the ai-dev-workflow repository. Run: git clone <repo_url> && cd ai-dev-workflow && ./install.sh"
+    _error "Framework files not found. Ensure you cloned ai-dev-workflow. Usage: cd <your-target-repo> && /path/to/ai-dev-workflow/install.sh"
 fi
 REPO_DIR="${SCRIPT_DIR}"
 

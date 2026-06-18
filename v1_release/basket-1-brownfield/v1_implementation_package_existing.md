@@ -64,8 +64,7 @@ agentic engineering environment — without blocking on pre-existing debt.
    `git checkout -b chore/claude-init`
 3. Confirm your test framework, linter, and type checker are installed and run
    from the repo root (e.g. `pytest`, `jest`, `ruff`, `eslint`, `mypy`, `tsc`).
-4. Copy `v1_claude_code_development_guide_existing.md` (the Guide) into the
-   repository root. The init prompt reads it from disk — do NOT attach it.
+4. Ensure you have executed the installer script (`/path/to/ai-dev-workflow/install.sh`) from within this repository's root.
 5. **Permission-mode check:** never run the init (or any session in a governed
    repo) with `--dangerously-skip-permissions`. The generated settings pin
    `defaultMode: "default"`; that pin only protects you if you don't override it
@@ -90,7 +89,7 @@ The init runs in TWO halves with a human checkpoint between them:
 
 ---------------------------------- PROMPT START ----------------------------------
 
-Read the file `v1_claude_code_development_guide_existing.md`.
+Read the file `v1_claude_code_development_guide_existing.md` in this repository's root.
 It is the engineering standard this initialization implements — internalize
 Sections 2 (configuration), 4 (stateful layer + enforcement hooks), 5 (gates),
 6 (testing discipline), and SECTION 2.5 (cognitive routing + execution gates)
@@ -389,113 +388,8 @@ questions)
         CONSTRAINTS / VERIFY / OUTPUT execution contract, zero implementation,
         hard stops flagged at the top.
 
-  C5. THE ENFORCEMENT LAYER — .githooks/ (Guide §4.5; this is what makes
-      every "blocks" in the constitution mechanical rather than volunteered):
-      - .githooks/gate.sh — the shared gate script. Its contract has exactly
-        one correct implementation; encode ALL of the following:
-          * TWO FINGERPRINT FORMS (Guide §4.2.3 F4): the working-tree
-            fingerprint (tree hash + pinned-config staged/unstaged diffs +
-            sorted shasums of untracked files) keys ONLY the in-session
-            ledger SKIP. Pre-commit receipts are keyed by the COMMIT TREE
-            (git write-tree on the index being committed, via a temp
-            index); pre-push matches git rev-parse 'HEAD^{tree}' against
-            that key. Conflating the two makes pre-push block every
-            legitimate push. In gate.sh use exactly these variable names:
-            WORKING_TREE_FP for the in-session ledger key and
-            COMMIT_TREE_FP for the receipt key used by pre-commit and
-            pre-push. Never assign both to the same variable.
-          * SCAN TARGET in pre-commit context = the index tree (what is
-            actually being committed), never the working tree — git
-            commit -a and git add -p partial staging make them differ.
-          * COLD START: if last_pass_sha is null, the change set is ALL
-            tracked files + untracked files. (git diff null..HEAD is a
-            fatal error — without this branch the gate crashes on the init
-            verification commit itself.) Write last_pass_sha = HEAD ONLY
-            after all gate checks complete with exit 0. If any check blocks
-            the commit, leave last_pass_sha as null so the next run takes
-            the all-files cold-start path again — never write it on entry.
-          * Scoped audit (hunk intersection + identity ratchet + severity
-            normalization table).
-          * TIER-2 ALGORITHM: query the installed test-impact tool with
-            the change set; run the returned set. Only if tooling is
-            absent (small repos): naming-contract-mapped tests of every
-            changed file PLUS the full transitive dependent test set of
-            any changed CORE_FILES entry (from the import graph), labeled
-            "TIER 2 (degraded: tooling absent)". grep is never the selector.
-          * IMPORT-GRAPH FRESHNESS: gate.sh must dynamically rebuild the
-            import graph whenever an import statement or a CORE_FILES entry
-            appears in the change set, or via a scheduled CI pipeline run.
-            A graph built once at init decays; the degraded path is a
-            short-lived bridge, never a permanent state.
-          * Full-suite wall-time recording and TIER TRANSITION REQUIRED
-            (Guide §6 T6).
-          * LINTER: run LINT_CMD (recorded at init in gate_state.json)
-            scoped to changed files where the tool supports it; non-zero
-            exit blocks the commit. Absence must be loud: record
-            NO_LINTER in the gate report, never silently skip.
-          * TYPE CHECKER: run TYPECHECK_CMD (recorded at init) on the
-            full project; non-zero exit blocks the commit. Record
-            NO_TYPECHECKER if absent.
-          * COVERAGE GATE: after the test run, assert line coverage ≥
-            COVERAGE_THRESHOLD (default 80%, stored in gate_state.json).
-            If coverage drops below threshold the commit is blocked.
-            Lowering the threshold requires a human PR, never an agent.
-          * COMPLEXITY GATE: run the stack's complexity scanner (radon
-            cc -n C for Python, eslint complexity rule for JS/TS,
-            gocyclo for Go) on changed files only; block if any function
-            exceeds COMPLEXITY_THRESHOLD (default cyclomatic complexity
-            10, stored in gate_state.json). High complexity is a leading
-            indicator of performance regression — cheaper to block at
-            commit time than profile in production.
-          * Atomic receipt writes (write tmp + rename) to gate_state.json.
-          * GATE REPORT emission to stdout.
-          * CRASH GUARD: if gate.sh exits for any reason other than a
-            deliberate gate block (missing dependency, scripting error,
-            unexpected exception), the pre-commit hook must treat the
-            result as a block — never as a pass. Emit gate.sh's stderr
-            verbatim and refuse the commit. Implement as: run gate.sh;
-            capture exit code; any non-zero exit is a block regardless
-            of cause. Never use a specific exit-code check that would
-            silently pass on an unexpected crash code.
-      - .githooks/pre-commit:
-          * if SKIP_GATE is set: apply Guide §4.4 K1 — deny-first, then
-            confirmation + reason via read -p from /dev/tty (a human-
-            presence backstop, not a categorical guarantee); on success
-            write the bypass as a git note (git notes --ref=bypasses add)
-            on the commit and exit 0
-          * else delegate to gate.sh; exit nonzero on any block
-      - .githooks/pre-push:
-          * refuse pushes to main/master/develop
-          * refuse any refspec beginning with '+'
-          * refuse any refspec containing a deletion semicolon targeting the
-            bypass trail (echo "$@" | grep -qE ":refs/notes/bypasses" must
-            return exit code 1)
-          * recompute git rev-parse 'HEAD^{tree}' and require a passing
-            receipt keyed by that commit-tree hash (never the working-tree
-            fingerprint)
-          * fetch refs/notes/bypasses, then enforce the bypass 24h deadline
-            using COMMITTER DATES, never ledger timestamps
-      - Per-clone activation (also wrapped in cc-init-hooks):
-          git config core.hooksPath .githooks
-          git config --add remote.origin.push  'refs/notes/bypasses:refs/notes/bypasses'
-          git config --add remote.origin.fetch '+refs/notes/bypasses:refs/notes/bypasses'
-        The notes refspecs are NOT optional: git does not push refs/notes/*
-        by default — without them the bypass audit trail never leaves the
-        laptop and CI cannot enforce the deadline.
-      - Add a CI job, after git fetch origin 'refs/notes/*:refs/notes/*',
-        so a hook-stripped clone still cannot merge unverified code. CI MUST
-        NOT run the PR branch's gate.sh. It must execute a copy fetched from
-        protected main to verify the PR's committed .githooks/ against a
-        hash recorded on main; a mismatch triggers an immediate CI failure.
-        CI parity is only authoritative if CI's gate script cannot be edited
-        by the change under review.
-        GOVERNANCE EVOLUTION PATH: governance and hook modifications are
-        strictly gated by CODEOWNERS and required human review on a protected
-        branch. The authoritative hash is updated by a privileged post-merge
-        job or derived from the merge commit on origin/main, NOT a
-        self-referential file inside the PR under review. CI compares against
-        origin/main's hooks after an approved merge, establishing the new
-        baseline.
+  C5. THE ENFORCEMENT LAYER:
+      Do NOT generate or modify `.githooks/gate.sh`, `.githooks/pre-commit`, or `.githooks/pre-push`. These files have already been placed in the repository by the installation script. Leave them untouched. You must only verify that the `.githooks/` directory exists.
 
   C6. Stateful-layer bootstrap:
       - .claude/gate_state.json with empty receipts and last_pass_sha: null

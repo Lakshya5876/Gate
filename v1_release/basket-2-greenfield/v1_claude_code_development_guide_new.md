@@ -51,18 +51,15 @@ This framework sits on top of Claude Code and standardises that execution. It pr
 ## Installation at a Glance
 
 ```bash
-# 1. Clone/enter your repository
-cd your-repository
+# 1. Clone the governed repository
+git clone <repository_url>
+cd <repository>
 
-# 2. Run the init script (copies .claude/ and .githooks/ into place)
-curl -s https://your-company/installer/claude-code-init.sh | bash
-
-# 3. Verify the installation
-git config core.hooksPath .githooks
-ls -la .claude/settings.json .claude/commands/ CLAUDE.md
-
-# 4. Activate hooks in this clone
+# 2. Activate hooks in this clone
 cc-init-hooks  # alias for: git config core.hooksPath .githooks
+
+# 3. Verify hooks are active
+git config core.hooksPath
 ```
 
 **What got installed:**
@@ -1602,18 +1599,15 @@ This framework sits on top of Claude Code and standardises that execution. It pr
 ## Installation at a Glance
 
 ```bash
-# 1. Clone/enter your repository
-cd your-repository
+# 1. Clone the governed repository
+git clone <repository_url>
+cd <repository>
 
-# 2. Run the init script (copies .claude/ and .githooks/ into place)
-curl -s https://your-company/installer/claude-code-init.sh | bash
-
-# 3. Verify the installation
-git config core.hooksPath .githooks
-ls -la .claude/settings.json .claude/commands/ CLAUDE.md
-
-# 4. Activate hooks in this clone
+# 2. Activate hooks in this clone
 cc-init-hooks  # alias for: git config core.hooksPath .githooks
+
+# 3. Verify hooks are active
+git config core.hooksPath
 ```
 
 **What got installed:**
