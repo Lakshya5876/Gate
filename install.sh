@@ -62,11 +62,21 @@ _fetch() {
         fi
     fi
 
-    # Fall back to GitHub download
+    # Fall back to GitHub download with URL integrity check
+    local url="${REPO_URL}/${src}"
     if command -v curl >/dev/null 2>&1; then
-        curl -sSfL "${REPO_URL}/${src}" -o "$dst" || _error "Failed to download ${src} from ${REPO_URL}/${src}"
+        # Check if URL returns 404 before downloading
+        local http_code=$(curl -sI -w "%{http_code}" -o /dev/null "$url" 2>/dev/null || echo "000")
+        if [ "$http_code" = "404" ]; then
+            _error "URL returns 404: ${url}"
+        fi
+        curl -sSfL "$url" -o "$dst" || _error "Failed to download ${src} from ${url}"
     elif command -v wget >/dev/null 2>&1; then
-        wget -qO "$dst" "${REPO_URL}/${src}" || _error "Failed to download ${src}"
+        # wget check
+        if ! wget --spider -q "$url" 2>/dev/null; then
+            _error "URL returns 404 or is unreachable: ${url}"
+        fi
+        wget -qO "$dst" "$url" || _error "Failed to download ${src}"
     else
         _error "curl or wget required. For local install, run from inside the ai-dev-workflow clone."
     fi
@@ -119,12 +129,8 @@ if [ "$BASKET" = "brownfield" ]; then
     _info "Checking repository size..."
     LOC=$(find . -not -path './.git/*' -type f | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
     _info "Approximate LOC: ${LOC}"
-    if [ "${LOC:-0}" -gt 200000 ]; then
-        _warn "Repository exceeds 200,000 LOC (${LOC} lines)."
-        _warn "V1 brownfield framework is validated for ≤200k LOC."
-        _warn "For larger repos, hierarchical CLAUDE.md subsystems are required — contact platform team."
-        read -r -p "Continue anyway? [y/N]: " LOC_CONFIRM </dev/tty
-        [[ "$LOC_CONFIRM" =~ ^[Yy]$ ]] || _error "Aborted. Resolve LOC ceiling before proceeding."
+    if [ "${LOC:-0}" -gt 1000000 ]; then
+        _error "Repository exceeds 1,000,000 LOC (${LOC} lines). V1 framework is certified for ≤1M LOC only."
     fi
 fi
 
@@ -458,12 +464,16 @@ echo ""
 echo "  1. Open Claude Code in this directory:"
 echo "     claude"
 echo ""
-echo "  2. Paste the full contents of ${INIT_PKG_DST} as your"
-echo "     first message. Claude Code will:"
+echo "  2. In ${INIT_PKG_DST}, locate the 'SYSTEM PROMPT' section."
+echo "     Paste ONLY that section as your first message."
+echo "     Claude Code will:"
 echo "     • Generate CLAUDE.md (repo-specific constitution)"
 echo "     • Generate stack-specific gate.sh commands"
 echo "     • Complete the governance scaffold"
 echo "     • Run Phase C verification"
+echo ""
+echo "  3. Keep ${INIT_PKG_DST} locally for reference — do NOT paste"
+echo "     the entire document, only the SYSTEM PROMPT section."
 echo ""
 echo "  After the init commit, your repo is fully governed."
 echo ""

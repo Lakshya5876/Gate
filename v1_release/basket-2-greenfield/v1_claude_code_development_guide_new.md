@@ -823,6 +823,87 @@ These rules apply at all times, regardless of graph availability:
 
 ---
 
+## 2.5.6 Challenge Phase — Pre-Execution Verification
+
+**Before ANY implementation starts, output this exact challenge — never skip:**
+
+```
+┌─ CHALLENGE PHASE
+├─ Is this the smallest useful wedge? (scope check)
+├─ What breaks if this is done wrong? (risk surface)
+└─ Can it be reverted in <5 minutes? (rollback time)
+```
+
+**Execution rule:** If you cannot answer all three questions with confidence, **STOP and ask the developer for clarification.** Never proceed speculatively.
+
+---
+
+## 2.5.7 Reflect Phase — Post-Commit Retrospective
+
+**After every successful commit (lines 3–5 only, appended to `.claude/progress.md`):**
+
+```markdown
+## [branch-name] @ [commit-hash]
+- ✓ [one sentence: what was delivered]
+- ⚠ [one sentence: risk or gotcha discovered]
+- ➤ [one sentence: what to do next OR what unblocks the next PR]
+```
+
+**Execution rule:** This entry is MANDATORY. If `.claude/progress.md` does not exist, create it. Entries are written ONLY AFTER `git commit` succeeds, never speculatively.
+
+---
+
+## 2.5.8 Caveman Mode — Zero Conversational Filler
+
+**Output standard: silence all narrative.** Only emit:
+- Code blocks (with language tag: `\`\`\`python`)
+- Exact terminal commands (with \`\`\`bash)
+- Single-sentence answers to clarifying questions
+- Error messages verbatim (no paraphrasing)
+
+**Prohibited output:**
+- "I'll now...", "Let me...", "Here's what I'm doing..."
+- Explanations of what the code does (the code IS the explanation)
+- Thinking steps or reasoning chains
+- Multi-paragraph prose
+
+**When you must break silence:** output exactly one sentence. Example: "Circular import detected in app/models.py — removing."
+
+---
+
+## 2.5.9 Graph Limit — Strict 50-Edge Cap Per Query
+
+**Before EVERY call to `query_graph_tool`, check the result count explicitly:**
+
+```bash
+query_graph_tool("symbol", max_depth=1)
+# Receives: "Found 347 callers (showing first 10)"
+# Your response: 
+#   ✓ Accept the first 10, proceed with analysis
+#   ✗ Never attempt to load all 347
+```
+
+**Mandatory scoping filters (apply BEFORE querying, not after):**
+- `in_files="app/services/**"` (narrow to one layer)
+- `max_depth=1` (direct calls only, not transitive)
+- `node_types=["FunctionDef"]` (exclude classes, modules if irrelevant)
+
+**Result interpretation rule:** A result count of 500+ callers on a single utility IS the finding — that code is over-centralized and needs refactoring. Do not load the full list; report the symptom and move on.
+
+---
+
+## 2.5.10 Context Flush — Post-Push Cleanup Command
+
+**After `git push` succeeds, output exactly this line:**
+
+```
+Task complete. Run `/clear` to flush session context.
+```
+
+**Execution rule:** This is non-optional. Every push workflow MUST end with this line. It signals to the developer that the session context is exhausted and should be reset to prevent token budget leakage in subsequent tasks.
+
+---
+
 # SECTION 3 — THE AGENTIC PIPELINE
 
 ## 3.1 Workspace Scanning — Token-Efficient Navigation

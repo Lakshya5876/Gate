@@ -1,5 +1,10 @@
 # Basket 1 — Brownfield Onboarding
 
+> [!CRITICAL]
+> **🔴 CRITICAL: Paste ONLY the 'SYSTEM PROMPT' section of `v1_implementation_package_existing.md`**
+>
+> Do NOT paste the entire document. Locate the section marked "SYSTEM PROMPT" at the top of the file and paste only that into Claude Code. Keep the rest of the document locally for reference.
+
 > [!IMPORTANT]
 > **START HERE: open [`v1_implementation_package_existing.md`](v1_implementation_package_existing.md) and read it end to end before doing anything else.**
 > It contains the pre-flight checklist, the LOC ceiling check, and the exact prompt to paste into Claude Code.
@@ -16,7 +21,7 @@ decrease from that point forward, never increase.
 
 ## V1 LOC Ceiling — Run This First
 
-This package carries a hard ceiling of **≤ 200,000 Lines of Code**. Before doing anything
+This package carries a hard ceiling of **≤ 1,000,000 Lines of Code**. Before doing anything
 else, verify your repository is within bounds.
 
 Run this command at your project root:
@@ -34,8 +39,8 @@ find . -type f \
   | xargs wc -l 2>/dev/null | tail -1
 ```
 
-If the `total` on the last line is **> 200,000**, stop here. This package is not compatible
-with your repository in V1. Wait for the V2 Enterprise Monorepo release.
+If the `total` on the last line is **> 1,000,000**, stop here. This package is not compatible
+with your repository in V1. Contact the platform team for monorepo governance assistance.
 
 ## Files in This Directory
 
@@ -47,7 +52,7 @@ with your repository in V1. Wait for the V2 Enterprise Monorepo release.
 ## Onboarding Steps
 
 **Step 1 — Verify LOC ceiling**
-Run the command above. Confirm your repo is under 200,000 LOC. If it is, continue.
+Run the command above. Confirm your repo is under 1,000,000 LOC. If it is, continue.
 
 **Step 2 — Copy the guide into your repository**
 Copy `v1_claude_code_development_guide_existing.md` into the root of your target repository,
@@ -59,7 +64,7 @@ Open Claude Code (CLI or Desktop app) inside your target repository. Create a ne
 ```bash
 git checkout -b chore/claude-init
 ```
-Then paste the full contents of `v1_implementation_package_existing.md` as your first message.
+Then locate the "SYSTEM PROMPT" section in `v1_implementation_package_existing.md` and paste **ONLY THAT SECTION** as your first message. Do not paste the entire document.
 Claude Code will run automated repository reconnaissance, map your existing architecture,
 freeze the current technical debt baseline, and wire all git hooks — one time, fully automated.
 

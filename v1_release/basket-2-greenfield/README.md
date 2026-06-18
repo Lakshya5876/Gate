@@ -1,5 +1,10 @@
 # Basket 2 — Greenfield Onboarding
 
+> [!CRITICAL]
+> **🔴 CRITICAL: Paste ONLY the 'SYSTEM PROMPT' section of `v1_implementation_package_new.md`**
+>
+> Do NOT paste the entire document. Locate the section marked "SYSTEM PROMPT" at the top of the file and paste only that into Claude Code. Keep the rest of the document locally for reference.
+
 > [!IMPORTANT]
 > **START HERE: open [`v1_implementation_package_new.md`](v1_implementation_package_new.md) and read it end to end before doing anything else.**
 > It contains the pre-flight checklist and the exact prompt to paste into Claude Code to scaffold and govern your new project.

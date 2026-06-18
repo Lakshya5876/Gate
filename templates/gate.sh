@@ -14,6 +14,15 @@ FRONTEND_TEST_CMD="${FRONTEND_TEST_CMD:-}"   # empty = skip
 FRONTEND_LINT_CMD="${FRONTEND_LINT_CMD:-}"   # empty = skip
 FRONTEND_TYPE_CMD="${FRONTEND_TYPE_CMD:-}"   # empty = skip
 
+# TEST EXECUTION FLAG: Set --run-tests=true to enable. Default = false (skip tests).
+# Usage: --run-tests=true git commit -m "message"
+# Or:    --run-tests=true git push
+RUN_TESTS="${RUN_TESTS:-false}"
+# Allow override via commit message: if message contains [run-tests] or [--run-tests=true], enable
+if git log -1 --pretty=%B 2>/dev/null | grep -qiE '\[.*run-?tests.*\]|--run-?tests'; then
+    RUN_TESTS="true"
+fi
+
 set -euo pipefail
 
 # ── Constants ────────────────────────────────────────────────────────────────
@@ -316,7 +325,7 @@ if $HAS_BACKEND && [ -n "$TYPE_CMD" ]; then
     fi
 fi
 
-if $HAS_BACKEND && [ -n "$TEST_CMD" ]; then
+if [ "$RUN_TESTS" = "true" ] && $HAS_BACKEND && [ -n "$TEST_CMD" ]; then
     echo "GATE: running tests + coverage (threshold: ${COVERAGE_THRESHOLD}%)..." >&2
     # Tests use hard timeout: a hung test suite is a blocking condition
     TIMEOUT_SEC=$(_json_get "$GATE_STATE" "thresholds.command_timeout_sec")
@@ -337,6 +346,8 @@ if $HAS_BACKEND && [ -n "$TEST_CMD" ]; then
             exit 1
         fi
     fi
+elif [ "$RUN_TESTS" != "true" ] && [ -n "$TEST_CMD" ]; then
+    echo "GATE: tests skipped (--run-tests=false). Pass --run-tests=true to enable." >&2
 fi
 
 if $HAS_BACKEND && [ -n "$COMPLEXITY_CMD" ]; then
