@@ -21,6 +21,7 @@ set -euo pipefail
 
 # ── Constants ──────────────────────────────────────────────────────────────────
 FRAMEWORK_VERSION="v1"
+FRAMEWORK_SEMVER="1.0.0"
 GRAPH_PACKAGE="code-review-graph==2.3.6"
 ORG_POLICY_PATH="${HOME}/.claude/org_policy.json"
 DEFAULT_TOKEN_BUDGET=50000
@@ -49,12 +50,211 @@ _fetch() {
     cp "$src_path" "$dst" || _error "Failed to copy ${src} to ${dst}"
 }
 
+_write_hooks() {
+    # Write gate.sh, pre-commit, and pre-push into .githooks/ and configure git.
+    # Called from the fresh-install flow (STEP 4) and from _upgrade().
+    mkdir -p .githooks
+
+    _fetch "templates/gate.sh" ".githooks/gate.sh"
+    chmod +x .githooks/gate.sh
+
+    cat > .githooks/pre-commit << 'PRECOMMIT'
+#!/usr/bin/env bash
+# pre-commit — delegates to gate.sh
+# SKIP_GATE=1 is a TTY-guarded bypass with git-note audit trail.
+set -euo pipefail
+
+# Detect an IDE-extension / non-interactive wrapper. In these environments an
+# interactive `read </dev/tty` either hangs the editor or fails on a missing
+# controlling terminal — so we must fall through gracefully, never block.
+_is_extension_or_non_tty() {
+    # Each condition is independent — explicit returns avoid &&/|| precedence traps.
+    [ ! -t 0 ]                              && return 0   # stdin not a terminal
+    [ ! -r /dev/tty ]                       && return 0   # no controlling terminal
+    [ "${TERM_PROGRAM:-}" = "vscode" ]      && return 0   # VS Code integrated terminal
+    [ -n "${VSCODE_PID:-}" ]                && return 0
+    [ -n "${VSCODE_GIT_IPC_HANDLE:-}" ]     && return 0
+    [ -n "${CURSOR_TRACE_ID:-}" ]           && return 0   # Cursor
+    case "${__CFBundleIdentifier:-}" in *vscode*|*cursor*) return 0 ;; esac
+    return 1
+}
+
+if [ "${SKIP_GATE:-0}" = "1" ]; then
+    # The bypass requires a typed reason at an interactive terminal. If we cannot
+    # safely prompt (extension/non-TTY), refuse with explicit instructions rather
+    # than hang the editor or emit control codes into the output pane.
+    if _is_extension_or_non_tty; then
+        echo "==============================================================" >&2
+        echo "[CRASH GUARD] SKIP_GATE bypass needs an interactive terminal." >&2
+        echo "An IDE-extension / non-TTY environment was detected, so the" >&2
+        echo "audited bypass prompt cannot run here (it would freeze the UI)." >&2
+        echo "" >&2
+        echo "To bypass the gate, run the commit from a real terminal:" >&2
+        echo "    SKIP_GATE=1 git commit -m \"your message\"" >&2
+        echo "and type the required bypass reason when prompted." >&2
+        echo "Otherwise, fix the gate findings and commit normally." >&2
+        echo "==============================================================" >&2
+        exit 1
+    fi
+    read -r -p "Bypass reason (required): " BYPASS_REASON </dev/tty
+    if [ -z "$BYPASS_REASON" ]; then
+        echo "Bypass reason is required. Aborting." >&2
+        exit 1
+    fi
+    COMMITTER_DATE=$(git var GIT_COMMITTER_DATE 2>/dev/null | awk '{print $1}')
+    git notes --ref=refs/notes/bypasses append HEAD -m "BYPASS | date=${COMMITTER_DATE} | reason=${BYPASS_REASON}" 2>/dev/null || true
+    echo "Gate bypassed. Reason logged to refs/notes/bypasses." >&2
+    exit 0
+fi
+
+GATE_TRIGGER=pre-commit exec "$(git rev-parse --git-dir)"/../.githooks/gate.sh
+PRECOMMIT
+    chmod +x .githooks/pre-commit
+
+    cat > .githooks/pre-push << 'PREPUSH'
+#!/usr/bin/env bash
+# pre-push — protected branch guard + fingerprint receipt check (via gate.sh)
+set -euo pipefail
+
+# Protected branches: exact names + release/* prefix. Matches gate.sh / spec §2.5.4.
+PROTECTED_EXACT="main master develop production"
+# Color only on a real terminal — IDE-extension wrappers (non-TTY) would otherwise
+# render raw ANSI escapes as garbage and can freeze the editor output pane.
+if [ -t 2 ]; then
+    RED='\033[0;31m'; YELLOW='\033[1;33m'; RESET='\033[0m'
+else
+    RED=''; YELLOW=''; RESET=''
+fi
+
+while IFS=' ' read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
+    REMOTE_BRANCH="${REMOTE_REF##refs/heads/}"
+
+    # Block force pushes (refspec starts with +)
+    if [[ "$LOCAL_REF" == +* ]]; then
+        echo -e "${RED}PRE-PUSH BLOCK: Force push is forbidden.${RESET}" >&2
+        exit 1
+    fi
+
+    # Block any refspec that deletes the bypass audit trail
+    if echo "$LOCAL_REF $REMOTE_REF" | grep -qE ':refs/notes/bypasses'; then
+        echo -e "${RED}PRE-PUSH BLOCK: Tampering with the bypass audit trail is forbidden.${RESET}" >&2
+        exit 1
+    fi
+
+    # Block direct pushes to protected branches (exact + release/* prefix)
+    for protected in $PROTECTED_EXACT; do
+        if [ "$REMOTE_BRANCH" = "$protected" ]; then
+            echo -e "${RED}PRE-PUSH BLOCK: Direct push to protected branch '${protected}' is forbidden. Open a PR.${RESET}" >&2
+            exit 1
+        fi
+    done
+    if [[ "$REMOTE_BRANCH" == release/* ]]; then
+        echo -e "${RED}PRE-PUSH BLOCK: Direct push to protected branch '${REMOTE_BRANCH}' is forbidden. Open a PR.${RESET}" >&2
+        exit 1
+    fi
+
+    # Bypass clock enforcement (24h policy):
+    #   active bypass (< 24h)  → WARN and allow push (audit trail still intact)
+    #   expired bypass (≥ 24h) → BLOCK push until the issue is fixed or a new bypass is opened
+    if git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -q "BYPASS"; then
+        BYPASS_DATE=$(git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -oE 'date=[0-9]+' | head -1 | cut -d= -f2)
+        NOW_EPOCH=$(date +%s)
+        if [ -n "$BYPASS_DATE" ]; then
+            BYPASS_AGE=$(( NOW_EPOCH - BYPASS_DATE ))
+            if [ "$BYPASS_AGE" -gt 86400 ]; then
+                echo -e "${RED}PRE-PUSH BLOCK: Bypass deadline expired.${RESET}" >&2
+                echo "A gate bypass was recorded $((BYPASS_AGE / 3600))h ago — the 24-hour resolution window has closed." >&2
+                echo "Fix the underlying issue and commit normally, OR open a new bypass window:" >&2
+                echo "    SKIP_GATE=1 git commit --allow-empty -m 'chore: extend bypass window — <reason>'" >&2
+                exit 1
+            else
+                REMAINING=$(( (86400 - BYPASS_AGE) / 3600 ))
+                echo -e "${YELLOW}⚠ Active bypass — pushing with audit note intact. Resolution deadline: ${REMAINING}h remaining.${RESET}" >&2
+            fi
+        fi
+    fi
+done
+
+# Run gate.sh for push-time checks (fingerprint receipt verification + mechanical tests)
+GATE_TRIGGER=pre-push exec "$(git rev-parse --git-dir)"/../.githooks/gate.sh
+PREPUSH
+    chmod +x .githooks/pre-push
+
+    git config core.hooksPath .githooks
+}
+
+_upgrade() {
+    cd "$REPO_ROOT"
+
+    [ -f ".claude/gate_state.json" ] || _error "--upgrade requires an existing governed repo (.claude/gate_state.json not found)."
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo " Claude Code Governance Framework — Upgrade to ${FRAMEWORK_SEMVER}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    _info "Re-copying gate.sh and hooks..."
+    _write_hooks
+    _success "Hooks updated."
+
+    # CI workflow is force-overwritten on upgrade (unlike fresh install which skips if exists)
+    mkdir -p .github/workflows
+    _fetch "templates/ci-gate.yml" ".github/workflows/gate.yml"
+    _success "CI gate workflow updated (.github/workflows/gate.yml)"
+
+    # Bump version in gate_state.json, preserve all user-owned fields
+    python3 - << PYEOF
+import json
+from datetime import datetime, timezone
+with open('.claude/gate_state.json') as f:
+    d = json.load(f)
+d['framework_version'] = '${FRAMEWORK_SEMVER}'
+d['framework_last_upgrade'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+with open('.claude/gate_state.json', 'w') as f:
+    json.dump(d, f, indent=2)
+PYEOF
+    _success "gate_state.json: framework_version → ${FRAMEWORK_SEMVER}"
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "${GREEN} Upgrade complete${RESET}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "What was updated:"
+    echo "  ✓ .githooks/gate.sh"
+    echo "  ✓ .githooks/pre-commit"
+    echo "  ✓ .githooks/pre-push"
+    echo "  ✓ .github/workflows/gate.yml"
+    echo "  ✓ .claude/gate_state.json: framework_version → ${FRAMEWORK_SEMVER}"
+    echo ""
+    echo "What was preserved:"
+    echo "  • .claude/baseline.json (debt ratchet — untouched)"
+    echo "  • CLAUDE.md (repo constitution — untouched)"
+    echo "  • .mcp.json (graph config — untouched)"
+    echo "  • gate_state.json: receipts, token data, thresholds, core_files"
+    echo ""
+    echo "Commit the upgrade to activate it for the whole team:"
+    echo "  git add .githooks/ .github/workflows/gate.yml .claude/gate_state.json"
+    echo "  git commit -m 'chore: upgrade governance framework to ${FRAMEWORK_SEMVER}'"
+    echo ""
+}
+
 # Locate the ai-dev-workflow framework directory (helpers exist now, so _error works)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ ! -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_package_existing.md" ]; then
     _error "Framework files not found. Ensure you cloned ai-dev-workflow. Usage: cd <your-target-repo> && /path/to/ai-dev-workflow/install.sh"
 fi
 REPO_DIR="${SCRIPT_DIR}"
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+UPGRADE_MODE=false
+for _arg in "$@"; do
+    case "$_arg" in
+        --upgrade) UPGRADE_MODE=true ;;
+        *) _error "Unknown argument: ${_arg}. Usage: ./install.sh [--upgrade]" ;;
+    esac
+done
 
 # ── STEP 0: Preflight checks ──────────────────────────────────────────────────
 echo ""
@@ -71,6 +271,9 @@ git rev-parse --git-dir >/dev/null 2>&1 || _error "Not inside a git repository. 
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 _info "Repository root: ${REPO_ROOT}"
+
+# Upgrade short-circuit — skip basket selection and all scaffolding
+if $UPGRADE_MODE; then _upgrade; exit 0; fi
 
 # Claude Code CLI check — advisory only, not a hard block
 if ! command -v claude >/dev/null 2>&1; then
@@ -140,6 +343,7 @@ from datetime import date
 with open('.claude/gate_state.json') as f:
     d = json.load(f)
 d.setdefault('token', {})['token_last_reset'] = str(date.today())
+d['framework_version'] = '${FRAMEWORK_SEMVER}'
 with open('.claude/gate_state.json', 'w') as f:
     json.dump(d, f, indent=2)
 "
@@ -183,138 +387,7 @@ fi
 
 # ── STEP 4: Install git hooks ──────────────────────────────────────────────────
 _info "Installing git hooks..."
-mkdir -p .githooks
-
-# gate.sh from template
-_fetch "templates/gate.sh" ".githooks/gate.sh"
-chmod +x .githooks/gate.sh
-
-# pre-commit hook
-cat > .githooks/pre-commit << 'PRECOMMIT'
-#!/usr/bin/env bash
-# pre-commit — delegates to gate.sh
-# SKIP_GATE=1 is a TTY-guarded bypass with git-note audit trail.
-set -euo pipefail
-
-# Detect an IDE-extension / non-interactive wrapper. In these environments an
-# interactive `read </dev/tty` either hangs the editor or fails on a missing
-# controlling terminal — so we must fall through gracefully, never block.
-_is_extension_or_non_tty() {
-    # Each condition is independent — explicit returns avoid &&/|| precedence traps.
-    [ ! -t 0 ]                              && return 0   # stdin not a terminal
-    [ ! -r /dev/tty ]                       && return 0   # no controlling terminal
-    [ "${TERM_PROGRAM:-}" = "vscode" ]      && return 0   # VS Code integrated terminal
-    [ -n "${VSCODE_PID:-}" ]                && return 0
-    [ -n "${VSCODE_GIT_IPC_HANDLE:-}" ]     && return 0
-    [ -n "${CURSOR_TRACE_ID:-}" ]           && return 0   # Cursor
-    case "${__CFBundleIdentifier:-}" in *vscode*|*cursor*) return 0 ;; esac
-    return 1
-}
-
-if [ "${SKIP_GATE:-0}" = "1" ]; then
-    # The bypass requires a typed reason at an interactive terminal. If we cannot
-    # safely prompt (extension/non-TTY), refuse with explicit instructions rather
-    # than hang the editor or emit control codes into the output pane.
-    if _is_extension_or_non_tty; then
-        echo "==============================================================" >&2
-        echo "[CRASH GUARD] SKIP_GATE bypass needs an interactive terminal." >&2
-        echo "An IDE-extension / non-TTY environment was detected, so the" >&2
-        echo "audited bypass prompt cannot run here (it would freeze the UI)." >&2
-        echo "" >&2
-        echo "To bypass the gate, run the commit from a real terminal:" >&2
-        echo "    SKIP_GATE=1 git commit -m \"your message\"" >&2
-        echo "and type the required bypass reason when prompted." >&2
-        echo "Otherwise, fix the gate findings and commit normally." >&2
-        echo "==============================================================" >&2
-        exit 1
-    fi
-    read -r -p "Bypass reason (required): " BYPASS_REASON </dev/tty
-    if [ -z "$BYPASS_REASON" ]; then
-        echo "Bypass reason is required. Aborting." >&2
-        exit 1
-    fi
-    COMMITTER_DATE=$(git var GIT_COMMITTER_DATE 2>/dev/null | awk '{print $1}')
-    git notes --ref=refs/notes/bypasses append HEAD -m "BYPASS | date=${COMMITTER_DATE} | reason=${BYPASS_REASON}" 2>/dev/null || true
-    echo "Gate bypassed. Reason logged to refs/notes/bypasses." >&2
-    exit 0
-fi
-
-GATE_TRIGGER=pre-commit exec "$(git rev-parse --git-dir)"/../.githooks/gate.sh
-PRECOMMIT
-chmod +x .githooks/pre-commit
-
-# pre-push hook
-cat > .githooks/pre-push << 'PREPUSH'
-#!/usr/bin/env bash
-# pre-push — protected branch guard + fingerprint receipt check (via gate.sh)
-set -euo pipefail
-
-# Protected branches: exact names + release/* prefix. Matches gate.sh / spec §2.5.4.
-PROTECTED_EXACT="main master develop production"
-# Color only on a real terminal — IDE-extension wrappers (non-TTY) would otherwise
-# render raw ANSI escapes as garbage and can freeze the editor output pane.
-if [ -t 2 ]; then
-    RED='\033[0;31m'; YELLOW='\033[1;33m'; RESET='\033[0m'
-else
-    RED=''; YELLOW=''; RESET=''
-fi
-
-while IFS=' ' read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
-    REMOTE_BRANCH="${REMOTE_REF##refs/heads/}"
-
-    # Block force pushes (refspec starts with +)
-    if [[ "$LOCAL_REF" == +* ]]; then
-        echo -e "${RED}PRE-PUSH BLOCK: Force push is forbidden.${RESET}" >&2
-        exit 1
-    fi
-
-    # Block any refspec that deletes the bypass audit trail
-    if echo "$LOCAL_REF $REMOTE_REF" | grep -qE ':refs/notes/bypasses'; then
-        echo -e "${RED}PRE-PUSH BLOCK: Tampering with the bypass audit trail is forbidden.${RESET}" >&2
-        exit 1
-    fi
-
-    # Block direct pushes to protected branches (exact + release/* prefix)
-    for protected in $PROTECTED_EXACT; do
-        if [ "$REMOTE_BRANCH" = "$protected" ]; then
-            echo -e "${RED}PRE-PUSH BLOCK: Direct push to protected branch '${protected}' is forbidden. Open a PR.${RESET}" >&2
-            exit 1
-        fi
-    done
-    if [[ "$REMOTE_BRANCH" == release/* ]]; then
-        echo -e "${RED}PRE-PUSH BLOCK: Direct push to protected branch '${REMOTE_BRANCH}' is forbidden. Open a PR.${RESET}" >&2
-        exit 1
-    fi
-
-    # Bypass clock enforcement (24h policy):
-    #   active bypass (< 24h)  → WARN and allow push (audit trail still intact)
-    #   expired bypass (≥ 24h) → BLOCK push until the issue is fixed or a new bypass is opened
-    if git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -q "BYPASS"; then
-        BYPASS_DATE=$(git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -oE 'date=[0-9]+' | head -1 | cut -d= -f2)
-        NOW_EPOCH=$(date +%s)
-        if [ -n "$BYPASS_DATE" ]; then
-            BYPASS_AGE=$(( NOW_EPOCH - BYPASS_DATE ))
-            if [ "$BYPASS_AGE" -gt 86400 ]; then
-                echo -e "${RED}PRE-PUSH BLOCK: Bypass deadline expired.${RESET}" >&2
-                echo "A gate bypass was recorded $((BYPASS_AGE / 3600))h ago — the 24-hour resolution window has closed." >&2
-                echo "Fix the underlying issue and commit normally, OR open a new bypass window:" >&2
-                echo "    SKIP_GATE=1 git commit --allow-empty -m 'chore: extend bypass window — <reason>'" >&2
-                exit 1
-            else
-                REMAINING=$(( (86400 - BYPASS_AGE) / 3600 ))
-                echo -e "${YELLOW}⚠ Active bypass — pushing with audit note intact. Resolution deadline: ${REMAINING}h remaining.${RESET}" >&2
-            fi
-        fi
-    fi
-done
-
-# Run gate.sh for push-time checks (fingerprint receipt verification + mechanical tests)
-GATE_TRIGGER=pre-push exec "$(git rev-parse --git-dir)"/../.githooks/gate.sh
-PREPUSH
-chmod +x .githooks/pre-push
-
-# Configure git to use .githooks/
-git config core.hooksPath .githooks
+_write_hooks
 _success "Git hooks installed (.githooks/)"
 
 # CI parity workflow — the authoritative backstop if local hooks are stripped.

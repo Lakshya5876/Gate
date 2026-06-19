@@ -234,19 +234,38 @@ OUTCOME="pass"
 if [ "$TOKEN_BUDGET" -gt 0 ] 2>/dev/null; then
     PCT=$(( TOTAL_SPENT * 100 / TOKEN_BUDGET ))
     if [ "$PCT" -ge 100 ]; then
-        echo -e "${RED}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━" >&2
-        echo "TOKEN HARD BLOCK — Org-wide daily budget exhausted." >&2
-        echo "Spent: ${TOTAL_SPENT} / Budget: ${TOKEN_BUDGET} tokens" >&2
-        echo "Resets: tomorrow (${TODAY} 00:00 UTC)" >&2
-        echo "To raise budget: update ~/.claude/org_policy.json TOKEN_BUDGET (requires human PR)." >&2
-        echo -e "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${RESET}" >&2
-        OUTCOME="hard_block"
-        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "hard_block"
-        [ -f "$GATE_STATE" ] && _json_set "$GATE_STATE" "token.token_spent_today" "$TOTAL_SPENT"
-        exit 1
+        if [ "${SESSION_SPEND_VAL:-0}" -gt 0 ] 2>/dev/null; then
+            # Active Claude session is adding new spend right now — block it.
+            # Human-authored commits (no live session, SESSION_SPEND_VAL=0) are
+            # never blocked here: gate.sh clears session_spend.tmp after every pass,
+            # so a zero value reliably means no agent involvement in this commit.
+            echo -e "${RED}TOKEN BUDGET EXHAUSTED — ${TOTAL_SPENT}/${TOKEN_BUDGET} tokens used today.${RESET}" >&2
+            echo "This commit comes from an active Claude session (session: +${SESSION_SPEND_VAL} tokens)." >&2
+            echo "AI-assisted workflow is paused until tomorrow's daily reset." >&2
+            echo "  • Human commits (no active session) pass automatically." >&2
+            echo "  • To override right now: SKIP_GATE=1 git commit -m \"...\" (prompts for reason + audit note)." >&2
+            echo "  • To raise the ceiling: update ~/.claude/org_policy.json TOKEN_BUDGET (human PR required)." >&2
+            OUTCOME="hard_block"
+            _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "hard_block"
+            [ -f "$GATE_STATE" ] && _json_set "$GATE_STATE" "token.token_spent_today" "$TOTAL_SPENT"
+            exit 1
+        else
+            # Budget exhausted but no active session — human-authored commit.
+            # Warn once per day so it's visible without becoming noise.
+            _LAST_WARN=$(_json_get "$GATE_STATE" "token.last_budget_warn_date")
+            if [ "${_LAST_WARN}" != "$TODAY" ]; then
+                echo -e "${YELLOW}⚠ Token budget exhausted (${TOTAL_SPENT}/${TOKEN_BUDGET}). Human commits pass; Claude sessions are paused until tomorrow.${RESET}" >&2
+                [ -f "$GATE_STATE" ] && _json_set "$GATE_STATE" "token.last_budget_warn_date" "\"$TODAY\""
+            fi
+        fi
     elif [ "$PCT" -ge 80 ]; then
-        echo -e "${YELLOW}⚠ TOKEN WARNING: ${PCT}% of daily budget used (${TOTAL_SPENT}/${TOKEN_BUDGET})${RESET}" >&2
-        OUTCOME="warn"
+        # Warn once per day — firing on every commit past 80% causes alert fatigue.
+        _LAST_WARN=$(_json_get "$GATE_STATE" "token.last_budget_warn_date")
+        if [ "${_LAST_WARN}" != "$TODAY" ]; then
+            echo -e "${YELLOW}⚠ Token budget at ${PCT}% (${TOTAL_SPENT}/${TOKEN_BUDGET} tokens used today).${RESET}" >&2
+            [ -f "$GATE_STATE" ] && _json_set "$GATE_STATE" "token.last_budget_warn_date" "\"$TODAY\""
+            OUTCOME="warn"
+        fi
     fi
 fi
 
@@ -254,12 +273,21 @@ fi
 if [ -f ".mcp.json" ] && [ -f "$GATE_STATE" ]; then
     LAST_BUILD=$(_json_get "$GATE_STATE" "mcp_graph.last_build_timestamp")
     if [ -n "$LAST_BUILD" ] && [ "$LAST_BUILD" != "null" ]; then
-        # Check if last build > 7 days ago (portable: compare epoch seconds)
         LAST_BUILD_EPOCH=$(date -d "$LAST_BUILD" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$LAST_BUILD" +%s 2>/dev/null || echo "0")
-        NOW_EPOCH=$(date +%s)
-        STALE_THRESHOLD=$(( 7 * 24 * 3600 ))
-        if [ $(( NOW_EPOCH - LAST_BUILD_EPOCH )) -gt "$STALE_THRESHOLD" ]; then
-            echo -e "${YELLOW}⚠ GRAPH STALE: last built >7 days ago. Run: code-review-graph build${RESET}" >&2
+        # Skip if date parsing failed (LAST_BUILD_EPOCH=0) to avoid permanent false-positives
+        # on environments where neither GNU nor BSD date understands the ISO format.
+        if [ "${LAST_BUILD_EPOCH:-0}" -gt 0 ] 2>/dev/null; then
+            NOW_EPOCH=$(date +%s)
+            STALE_THRESHOLD=$(( 7 * 24 * 3600 ))
+            if [ $(( NOW_EPOCH - LAST_BUILD_EPOCH )) -gt "$STALE_THRESHOLD" ]; then
+                # Warn once per day — the rebuild takes minutes, devs can't action it
+                # mid-commit anyway, so repeating on every commit is pure noise.
+                _LAST_GRAPH_WARN=$(_json_get "$GATE_STATE" "mcp_graph.last_stale_warn_date")
+                if [ "${_LAST_GRAPH_WARN}" != "$TODAY" ]; then
+                    echo -e "${YELLOW}Note: code graph not rebuilt in >7 days — run when convenient: code-review-graph build${RESET}" >&2
+                    [ -f "$GATE_STATE" ] && _json_set "$GATE_STATE" "mcp_graph.last_stale_warn_date" "\"$TODAY\""
+                fi
+            fi
         fi
     fi
 fi
