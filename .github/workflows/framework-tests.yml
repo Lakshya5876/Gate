@@ -1,0 +1,23 @@
+name: framework-tests
+
+on:
+  push:
+    branches: [init_release, develop, main]
+  pull_request:
+    branches: [init_release, develop, main]
+
+permissions:
+  contents: read
+
+jobs:
+  gate-integration:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install bats-core
+        run: sudo apt-get update && sudo apt-get install -y bats
+
+      - name: Run gate.sh integration tests
+        run: chmod +x tests/gate/run_tests.sh && ./tests/gate/run_tests.sh
