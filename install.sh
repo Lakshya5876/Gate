@@ -20,13 +20,6 @@
 set -euo pipefail
 
 # ── Constants ──────────────────────────────────────────────────────────────────
-# Locate the ai-dev-workflow framework directory
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [ ! -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_package_existing.md" ]; then
-    _error "Framework files not found. Ensure you cloned ai-dev-workflow. Usage: cd <your-target-repo> && /path/to/ai-dev-workflow/install.sh"
-fi
-REPO_DIR="${SCRIPT_DIR}"
-
 FRAMEWORK_VERSION="v1"
 GRAPH_PACKAGE="code-review-graph==2.3.6"
 ORG_POLICY_PATH="${HOME}/.claude/org_policy.json"
@@ -34,7 +27,7 @@ DEFAULT_TOKEN_BUDGET=50000
 
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; BLUE='\033[0;34m'; RESET='\033[0m'
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# ── Helpers (defined before first use) ────────────────────────────────────────
 _info()    { echo -e "${BLUE}[install]${RESET} $*"; }
 _success() { echo -e "${GREEN}[install]${RESET} ✓ $*"; }
 _warn()    { echo -e "${YELLOW}[install]${RESET} ⚠ $*"; }
@@ -55,6 +48,13 @@ _fetch() {
 
     cp "$src_path" "$dst" || _error "Failed to copy ${src} to ${dst}"
 }
+
+# Locate the ai-dev-workflow framework directory (helpers exist now, so _error works)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_package_existing.md" ]; then
+    _error "Framework files not found. Ensure you cloned ai-dev-workflow. Usage: cd <your-target-repo> && /path/to/ai-dev-workflow/install.sh"
+fi
+REPO_DIR="${SCRIPT_DIR}"
 
 # ── STEP 0: Preflight checks ──────────────────────────────────────────────────
 echo ""
@@ -162,6 +162,25 @@ fi
 echo '{"mode": null, "complexity_tier": null, "budget_pct_at_selection": null, "timestamp": null}' > .claude/session_state.json
 _success "session_state.json created (gitignored)"
 
+# baseline.json — brownfield only. Seeded UNPOPULATED here; the init prompt
+# (Phase C/D) fills lint_findings once LINT_CMD is known, then sets populated=true.
+# gate.sh treats an unpopulated baseline as zero-tolerance until it is filled.
+if [ "$BASKET" = "brownfield" ] && [ ! -f ".claude/baseline.json" ]; then
+    HEAD_SHA_NOW=$(git rev-parse HEAD 2>/dev/null || echo "INIT")
+    cat > .claude/baseline.json << BASELINE
+{
+  "_comment": "Identity-based debt baseline. gate.sh grandfathers these findings and blocks any NEW identity. Identity = '<normalized_path>|<rule_code>'. Committed team state — edited only via human-authored PR.",
+  "ratchet_mode": "identity",
+  "populated": false,
+  "generated_at": null,
+  "generated_from_sha": "${HEAD_SHA_NOW}",
+  "lint_findings": [],
+  "summary": { "lint_count": 0 }
+}
+BASELINE
+    _success "baseline.json seeded (unpopulated — init prompt fills it)"
+fi
+
 # ── STEP 4: Install git hooks ──────────────────────────────────────────────────
 _info "Installing git hooks..."
 mkdir -p .githooks
@@ -201,11 +220,12 @@ chmod +x .githooks/pre-commit
 # pre-push hook
 cat > .githooks/pre-push << 'PREPUSH'
 #!/usr/bin/env bash
-# pre-push — protected branch guard + fingerprint receipt check
+# pre-push — protected branch guard + fingerprint receipt check (via gate.sh)
 set -euo pipefail
 
-PROTECTED_BRANCHES="main master develop"
-RED='\033[0;31m'; RESET='\033[0m'
+# Protected branches: exact names + release/* prefix. Matches gate.sh / spec §2.5.4.
+PROTECTED_EXACT="main master develop production"
+RED='\033[0;31m'; YELLOW='\033[1;33m'; RESET='\033[0m'
 
 while IFS=' ' read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
     REMOTE_BRANCH="${REMOTE_REF##refs/heads/}"
@@ -216,13 +236,23 @@ while IFS=' ' read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
         exit 1
     fi
 
-    # Block direct pushes to protected branches
-    for protected in $PROTECTED_BRANCHES; do
+    # Block any refspec that deletes the bypass audit trail
+    if echo "$LOCAL_REF $REMOTE_REF" | grep -qE ':refs/notes/bypasses'; then
+        echo -e "${RED}PRE-PUSH BLOCK: Tampering with the bypass audit trail is forbidden.${RESET}" >&2
+        exit 1
+    fi
+
+    # Block direct pushes to protected branches (exact + release/* prefix)
+    for protected in $PROTECTED_EXACT; do
         if [ "$REMOTE_BRANCH" = "$protected" ]; then
             echo -e "${RED}PRE-PUSH BLOCK: Direct push to protected branch '${protected}' is forbidden. Open a PR.${RESET}" >&2
             exit 1
         fi
     done
+    if [[ "$REMOTE_BRANCH" == release/* ]]; then
+        echo -e "${RED}PRE-PUSH BLOCK: Direct push to protected branch '${REMOTE_BRANCH}' is forbidden. Open a PR.${RESET}" >&2
+        exit 1
+    fi
 
     # Check for unexpired bypass clock entries (24h policy)
     if git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -q "BYPASS"; then
@@ -234,7 +264,7 @@ while IFS=' ' read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
     fi
 done
 
-# Run gate.sh for push-time checks
+# Run gate.sh for push-time checks (fingerprint receipt verification + mechanical tests)
 GATE_TRIGGER=pre-push exec "$(git rev-parse --git-dir)"/../.githooks/gate.sh
 PREPUSH
 chmod +x .githooks/pre-push
@@ -242,6 +272,15 @@ chmod +x .githooks/pre-push
 # Configure git to use .githooks/
 git config core.hooksPath .githooks
 _success "Git hooks installed (.githooks/)"
+
+# CI parity workflow — the authoritative backstop if local hooks are stripped.
+mkdir -p .github/workflows
+if [ ! -f ".github/workflows/gate.yml" ]; then
+    _fetch "templates/ci-gate.yml" ".github/workflows/gate.yml"
+    _success "CI gate workflow installed (.github/workflows/gate.yml)"
+else
+    _warn ".github/workflows/gate.yml already exists — left unchanged. Compare against templates/ci-gate.yml manually."
+fi
 
 # Bypass note refspecs (so bypass audit trail leaves the machine)
 git config --add remote.origin.push  'refs/notes/bypasses:refs/notes/bypasses' 2>/dev/null || true
@@ -418,6 +457,10 @@ echo "  ✓ Dev guide:      ${DEV_GUIDE_DST}"
 echo "  ✓ Init package:   ${INIT_PKG_DST}"
 echo "  ✓ Gate ledger:    .claude/gate_state.json"
 echo "  ✓ Git hooks:      .githooks/ (pre-commit, pre-push, gate.sh)"
+echo "  ✓ CI workflow:    .github/workflows/gate.yml (CI parity backstop)"
+if [ "$BASKET" = "brownfield" ]; then
+echo "  ✓ Debt baseline:  .claude/baseline.json (unpopulated — init prompt fills it)"
+fi
 echo "  ✓ Org policy:     ${ORG_POLICY_PATH} (TOKEN_BUDGET=${DEFAULT_TOKEN_BUDGET})"
 if $GRAPH_INSTALLED 2>/dev/null; then
 echo "  ✓ Graph server:   code-review-graph ${GRAPH_PACKAGE##*==} (${GRAPH_BIN_PATH})"

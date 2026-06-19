@@ -11,6 +11,9 @@
     "git_cache_ttl_sec": 60
   },
 
+  "core_files": [],
+  "_core_files_comment": "Glob patterns (fnmatch) for architecture-critical files. Any change touching a match forces TIER-3: full test suite + mandatory test run even at pre-commit. Edited only via human PR.",
+
   "token": {
     "_comment": "token_budget is READ from ~/.claude/org_policy.json first. Value here is repo-level ceiling and must be <= org ceiling.",
     "token_budget": 50000,
@@ -66,5 +69,6 @@
 
   "session_state_path": ".claude/session_state.json",
 
+  "_receipts_comment": "Keyed by COMMIT_TREE_FP (git tree hash of the committed index). Written by pre-commit after all checks pass; verified by pre-push. Never keyed by the working-tree fingerprint.",
   "receipts": {}
 }

@@ -61,13 +61,20 @@ A working-tree fingerprint (tree hash + staged diff + unstaged diff + untracked 
 is computed at session start and matched at pre-push. If the fingerprint does not match, the
 push is blocked until the session ledger is reconciled.
 
-## 🧪 Pre-Commit Testing (Opt-In)
+## 🧪 Testing — Opt-In at Commit, Mechanical at Push
 
-To keep your commits blazingly fast, global test suites (like `pytest` or `npm test`) are **skipped by default** during the pre-commit hook.
+Tests are **opt-in at pre-commit** to keep day-to-day commits fast, but **mandatory and
+mechanical** where it matters — code cannot leave a machine or merge untested.
 
-* **To run tests:** You must explicitly pass the `--run-tests=true` flag in your commit message.
-  * *Example:* `git commit -m "feat: added login logic --run-tests=true"`
-* If you omit this flag, the gate will only run linting and formatting checks to preserve your momentum.
+| Stage | Tests run? |
+|---|---|
+| `git commit` (normal) | Opt-in — add `--run-tests=true` to the commit message |
+| `git commit` touching a **CORE_FILES** path | Always (full suite, forced — TIER-3) |
+| `git push` | Always (full suite, or a verified pre-commit receipt for the exact tree) |
+| CI (`.github/workflows/gate.yml`) | Always (authoritative backstop if local hooks are stripped) |
+
+A coverage gate (default 80%, configured at init) blocks when unmet. The pre-push hook has
+no opt-out short of the audited, 24-hour `SKIP_GATE` bypass.
 
 ## V1 Constraints
 

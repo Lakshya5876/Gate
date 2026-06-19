@@ -1,0 +1,46 @@
+# CI parity gate — deployed by install.sh to .github/workflows/gate.yml
+# Runs the committed gate.sh in CI mode so a hook-stripped clone (a developer
+# who deleted .githooks or pushed with --no-verify) still cannot merge unverified
+# code. CI is the authoritative backstop to the local pre-commit/pre-push hooks.
+name: governance-gate
+
+on:
+  pull_request:
+    branches: [main, master, develop, "release/**", production]
+  push:
+    branches: [main, master, develop, "release/**", production]
+
+permissions:
+  contents: read
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history — gate needs diff range)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python (gate.sh json helpers)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Verify governance files are present and unmodified by the PR
+        run: |
+          set -euo pipefail
+          test -f .githooks/gate.sh   || { echo "::error::.githooks/gate.sh missing — governance stripped"; exit 1; }
+          test -f .claude/gate_state.json || { echo "::error::.claude/gate_state.json missing"; exit 1; }
+          echo "Governance files present."
+
+      - name: Run governance gate (mechanical — tests forced on in CI)
+        env:
+          GATE_TRIGGER: ci
+          RUN_TESTS: "true"
+        run: |
+          set -euo pipefail
+          chmod +x .githooks/gate.sh
+          # CI runs the gate against the checked-out tree. Tests, coverage,
+          # lint ratchet, complexity, and secrets scan all execute mechanically.
+          bash .githooks/gate.sh

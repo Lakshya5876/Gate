@@ -30,37 +30,35 @@ fresh workspaces and scales with the project as it grows.
 
 ## Installation
 
-**Step 1 — Clone ai-dev-workflow**
+The installer always writes into **the repository you are standing in** (it resolves the
+target with `git rev-parse --show-toplevel`). Clone the framework once, then run it *from
+inside your new project* using the framework's path.
+
+**Step 1 — Clone the framework once (anywhere)**
 ```bash
-git clone <repository_url>
-cd ai-dev-workflow
+git clone <repository_url> ~/tools/ai-dev-workflow
 ```
 
 **Step 2 — Initialize a fresh workspace**
-Create an empty directory for your new project and initialize a Git repository inside it:
 ```bash
 mkdir my-new-project && cd my-new-project
 git init
-git checkout -b develop
+git checkout -b chore/claude-init
+git commit --allow-empty -m "chore: repository birth"
 ```
-Do not add any files yet. The initialization package will scaffold the correct structure for you.
 
-**Step 3 — Run the installer**
-From within the ai-dev-workflow directory, run:
+**Step 3 — Run the installer by its path (from inside your new project)**
 ```bash
-./install.sh
+~/tools/ai-dev-workflow/install.sh        # choose [g] greenfield when prompted
 ```
-This will scaffold `.claude/`, `.githooks/`, and copy governance files into your new project.
+The installer copies the dev guide + init package into your project root, scaffolds
+`.claude/`, wires `.githooks/`, and installs the CI parity workflow at
+`.github/workflows/gate.yml`.
 
-**Step 4 — Copy the guide into your repository**
-Copy `v1_claude_code_development_guide_new.md` into the root of your new repository,
-keeping the filename exactly as-is. The init prompt reads it from disk — Claude Code uses it
-to generate the `CLAUDE.md` constitution prescribing your four-layer architecture, naming
-contracts, security invariants, and enforcement rules from day one.
-
-**Step 5 — Execute the initialization package**
-Open Claude Code (CLI or Desktop app) inside your new repository. Locate the "SYSTEM PROMPT" section
-in `v1_implementation_package_new.md` and paste **ONLY THAT SECTION** as your first message. Claude Code will automatically:
+**Step 4 — Execute the initialization package**
+Open Claude Code (CLI or Desktop app) in your new project. Locate the "SYSTEM PROMPT" section
+in `v1_implementation_package_new.md` and paste **ONLY THAT SECTION** as your first message.
+Claude Code will automatically:
 
 - Scaffold the four-layer directory structure:
   - `domain/` — pure data contracts and Pydantic models, zero framework dependencies
@@ -74,10 +72,20 @@ in `v1_implementation_package_new.md` and paste **ONLY THAT SECTION** as your fi
 After the init commit lands, your project has a fully governed, ideally structured foundation.
 Every feature you build from that point forward is enforced against the constitution automatically.
 
-## 🧪 Pre-Commit Testing (Opt-In)
+## 🧪 Testing — Opt-In at Commit, Mechanical at Push
 
-To keep your commits blazingly fast, global test suites (like `pytest` or `npm test`) are **skipped by default** during the pre-commit hook.
+Tests are **opt-in at pre-commit** so day-to-day commits stay fast, but **mandatory and
+mechanical** at the points that protect the codebase — code cannot leave your machine or
+merge untested.
 
-* **To run tests:** You must explicitly pass the `--run-tests=true` flag in your commit message.
-  * *Example:* `git commit -m "feat: new user signup endpoint --run-tests=true"`
-* If you omit this flag, the gate will only run linting and formatting checks to preserve your momentum.
+| Stage | Tests run? | How |
+|---|---|---|
+| `git commit` (normal) | Opt-in | Add `--run-tests=true` to the commit message to run them |
+| `git commit` touching a **CORE_FILES** path | **Always (TIER-3)** | Full suite forced automatically — no flag needed |
+| `git push` | **Always** | Pre-push runs the full suite (or verifies a passing pre-commit receipt for the exact tree) |
+| CI (`.github/workflows/gate.yml`) | **Always** | Authoritative backstop even if local hooks were stripped |
+
+* **Run tests at commit:** `git commit -m "feat: new user signup endpoint --run-tests=true"`
+* **Coverage gate:** when a coverage command is configured at init, coverage below the
+  threshold (default 80%) blocks the commit/push.
+* For a greenfield repo there is no debt baseline — lint is zero-tolerance from commit #1.

@@ -29,6 +29,7 @@ set -euo pipefail
 GATE_STATE=".claude/gate_state.json"
 SESSION_SPEND=".claude/session_spend.tmp"
 GIT_CACHE=".claude/git_cache.json"
+BASELINE=".claude/baseline.json"
 ORG_POLICY="${HOME}/.claude/org_policy.json"
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; RESET='\033[0m'
 
@@ -85,6 +86,44 @@ d.setdefault('token', {})['token_audit_log'] = log
 with open('$GATE_STATE', 'w') as f:
     json.dump(d, f, indent=2)
 " 2>/dev/null
+}
+
+# ── Fingerprint receipt helpers (spec §4.2 — two distinct forms) ──────────────
+# COMMIT_TREE_FP keys receipts (pre-commit writes, pre-push verifies).
+# Receipts are pruned to the most recent 50 to bound ledger growth.
+_receipt_write() {
+    # Usage: _receipt_write <tree_hash> <branch>
+    [ -f "$GATE_STATE" ] || return 0
+    [ -n "$1" ] || return 0
+    python3 -c "
+import json
+from datetime import datetime, timezone
+with open('$GATE_STATE') as f:
+    d = json.load(f)
+r = d.setdefault('receipts', {})
+r['$1'] = {'timestamp': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ'), 'branch': '$2', 'outcome': 'pass'}
+# Bound growth: keep the 50 most recent by timestamp
+if len(r) > 50:
+    keep = sorted(r.items(), key=lambda kv: kv[1].get('timestamp',''), reverse=True)[:50]
+    d['receipts'] = dict(keep)
+with open('$GATE_STATE', 'w') as f:
+    json.dump(d, f, indent=2)
+" 2>/dev/null
+}
+
+_receipt_has_pass() {
+    # Usage: _receipt_has_pass <tree_hash> -> echoes "yes" or "no"
+    if [ ! -f "$GATE_STATE" ] || [ -z "$1" ]; then echo "no"; return 0; fi
+    python3 -c "
+import json
+try:
+    with open('$GATE_STATE') as f:
+        d = json.load(f)
+    r = d.get('receipts', {}).get('$1', {})
+    print('yes' if r.get('outcome') == 'pass' else 'no')
+except Exception:
+    print('no')
+" 2>/dev/null || echo "no"
 }
 
 _run_with_timeout() {
@@ -246,6 +285,56 @@ done <<< "$CHANGED_FILES"
 
 echo "GATE: scope=${SCAN_MODE} | backend=${HAS_BACKEND} | frontend=${HAS_FRONTEND}" >&2
 
+# ── STEP 4.3: CORE_FILES RATCHET → TIER-3 DETECTION ──────────────────────────
+# If any changed file matches a CORE_FILES glob, escalate to TIER-3:
+# full test suite (no changed-file scoping) + mandatory test run even at commit.
+CORE_FILES_TOUCHED=false
+if [ -f "$GATE_STATE" ]; then
+    CORE_MATCH=$(python3 -c "
+import json, fnmatch
+try:
+    with open('$GATE_STATE') as f:
+        d = json.load(f)
+    patterns = d.get('core_files', []) or []
+    changed = '''$CHANGED_FILES'''.split('\n')
+    hit = next((c for c in changed if c and any(fnmatch.fnmatch(c, p) for p in patterns)), '')
+    print(hit)
+except Exception:
+    print('')
+" 2>/dev/null || echo "")
+    if [ -n "$CORE_MATCH" ]; then
+        CORE_FILES_TOUCHED=true
+        echo -e "${YELLOW}GATE: TIER-3 — CORE_FILES touched ('${CORE_MATCH}'). Full suite + mandatory tests.${RESET}" >&2
+    fi
+fi
+
+# ── STEP 4.5: FINGERPRINT FORMS (spec §4.2 — never conflate) ─────────────────
+# WORKING_TREE_FP: working-tree state, keys the in-session ledger skip ONLY.
+# COMMIT_TREE_FP : the tree actually being committed/pushed, keys receipts.
+WORKING_TREE_FP=""
+COMMIT_TREE_FP=""
+WORKING_TREE_FP=$( { git rev-parse 'HEAD^{tree}' 2>/dev/null; git diff -p 2>/dev/null; git diff --cached -p 2>/dev/null; } | shasum 2>/dev/null | awk '{print $1}' || echo "")
+
+if [ "$GATE_TRIGGER" = "pre-push" ]; then
+    COMMIT_TREE_FP=$(git rev-parse 'HEAD^{tree}' 2>/dev/null || echo "")
+    # Receipt fast-path: a prior pre-commit run already verified this exact tree.
+    if [ "$(_receipt_has_pass "$COMMIT_TREE_FP")" = "yes" ]; then
+        echo -e "${GREEN}GATE: pre-push receipt verified for tree ${COMMIT_TREE_FP:0:12} — checks already passed at commit.${RESET}" >&2
+        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "pass:receipt"
+        exit 0
+    fi
+    # No receipt → run full mechanical verification now (tests forced on).
+    echo -e "${YELLOW}GATE: no pre-commit receipt for this tree — running full mechanical checks before push.${RESET}" >&2
+    RUN_TESTS="true"
+else
+    COMMIT_TREE_FP=$(git write-tree 2>/dev/null || echo "")
+fi
+
+# Mechanical test enforcement: push and CI always run tests; CORE_FILES always run tests.
+if [ "$GATE_TRIGGER" = "pre-push" ] || [ "$GATE_TRIGGER" = "ci" ] || [ "$CORE_FILES_TOUCHED" = true ]; then
+    RUN_TESTS="true"
+fi
+
 # ── STEP 5: SECRETS SCAN ─────────────────────────────────────────────────────
 SECRETS_FOUND=0
 if git diff --cached --diff-filter=ACMR -p 2>/dev/null | \
@@ -362,19 +451,27 @@ _infer_playwright_cmd() {
     fi
 }
 
-# Build execution queue: init overrides first, then inferred runners
+# Build execution queue: init overrides first, then inferred runners.
+# TIER-3 (CORE_FILES touched) runs the FULL suite — pass empty scope so inference
+# does not narrow to changed files.
+if [ "$CORE_FILES_TOUCHED" = true ]; then
+    TEST_SCOPE_FILES=""
+else
+    TEST_SCOPE_FILES="$CHANGED_FILES"
+fi
+
 TEST_RUNNERS=()
 if [ -n "$TEST_CMD" ]; then
     TEST_RUNNERS+=("$TEST_CMD")
 else
-    _INFERRED_BACKEND=$(_infer_backend_test_cmd "$CHANGED_FILES")
+    _INFERRED_BACKEND=$(_infer_backend_test_cmd "$TEST_SCOPE_FILES")
     [ -n "$_INFERRED_BACKEND" ] && TEST_RUNNERS+=("$_INFERRED_BACKEND")
 fi
 
 if [ -n "$FRONTEND_TEST_CMD" ]; then
     TEST_RUNNERS+=("$FRONTEND_TEST_CMD")
 else
-    _INFERRED_PW=$(_infer_playwright_cmd "$CHANGED_FILES")
+    _INFERRED_PW=$(_infer_playwright_cmd "$TEST_SCOPE_FILES")
     [ -n "$_INFERRED_PW" ] && TEST_RUNNERS+=("$_INFERRED_PW")
 fi
 
@@ -414,11 +511,62 @@ COMPLEXITY_THRESHOLD="${COMPLEXITY_THRESHOLD:-10}"
 
 if $HAS_BACKEND && [ -n "$LINT_CMD" ]; then
     echo "GATE: running lint..." >&2
-    if ! _run_with_timeout "lint" bash -c "$LINT_CMD"; then
-        echo -e "${RED}GATE BLOCK: lint failed.${RESET}" >&2
-        OUTCOME="block:lint"
-        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
-        exit 1
+    LINT_RC=0
+    LINT_OUTPUT=$(bash -c "$LINT_CMD" 2>&1) || LINT_RC=$?
+
+    # Identity-based debt ratchet (brownfield): when a populated baseline.json
+    # exists, grandfather pre-existing findings and block only NEW identities.
+    # Identity = "<normalized_path>|<rule_code>" (line excluded → format-insensitive).
+    # Greenfield (no baseline) keeps zero-tolerance: any lint failure blocks.
+    RATCHET_ACTIVE=false
+    if [ -f "$BASELINE" ]; then
+        RATCHET_ACTIVE=$(python3 -c "
+import json
+try:
+    with open('$BASELINE') as f: b = json.load(f)
+    print('true' if b.get('populated') and isinstance(b.get('lint_findings'), list) else 'false')
+except Exception:
+    print('false')
+" 2>/dev/null || echo "false")
+    fi
+
+    if [ "$RATCHET_ACTIVE" = "true" ]; then
+        NEW_FINDINGS=$(python3 -c "
+import json, re, sys
+with open('$BASELINE') as f: b = json.load(f)
+baseline = set(b.get('lint_findings', []))
+new = []
+for line in '''$LINT_OUTPUT'''.splitlines():
+    m = re.match(r'^([^:]+):\d+:\d+:\s+([A-Z]+[0-9]+)', line.strip())
+    if not m:
+        continue
+    ident = m.group(1) + '|' + m.group(2)
+    if ident not in baseline:
+        new.append(ident)
+for n in sorted(set(new)):
+    print(n)
+" 2>/dev/null || echo "__PARSE_FAIL__")
+        if [ "$NEW_FINDINGS" = "__PARSE_FAIL__" ]; then
+            # Unparseable linter format → fall back to exit-code enforcement.
+            if [ "$LINT_RC" -ne 0 ]; then
+                echo -e "${RED}GATE BLOCK: lint failed (ratchet unavailable for this linter format).${RESET}" >&2
+                echo "$LINT_OUTPUT" | head -50 >&2
+                OUTCOME="block:lint"; _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"; exit 1
+            fi
+        elif [ -n "$NEW_FINDINGS" ]; then
+            echo -e "${RED}GATE BLOCK: new lint findings not in baseline (debt ratchet):${RESET}" >&2
+            echo "$NEW_FINDINGS" | head -50 >&2
+            OUTCOME="block:lint-ratchet"; _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"; exit 1
+        else
+            echo "GATE: lint clean against baseline (pre-existing debt grandfathered)." >&2
+        fi
+    else
+        # No baseline → zero tolerance.
+        if [ "$LINT_RC" -ne 0 ]; then
+            echo -e "${RED}GATE BLOCK: lint failed.${RESET}" >&2
+            echo "$LINT_OUTPUT" | head -50 >&2
+            OUTCOME="block:lint"; _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"; exit 1
+        fi
     fi
 fi
 
@@ -466,8 +614,35 @@ if [ "$RUN_TESTS" = "true" ] && [ ${#TEST_RUNNERS[@]} -gt 0 ]; then
         _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
         exit 1
     fi
+
+    # ── COVERAGE GATE ─────────────────────────────────────────────────────────
+    # Executes COVERAGE_CMD (set by init), parses the trailing percentage, and
+    # blocks when line coverage drops below COVERAGE_THRESHOLD. Lowering the
+    # threshold requires a human PR (gate_state.json is agent-immutable).
+    if [ -n "$COVERAGE_CMD" ]; then
+        echo "GATE: measuring coverage (min ${COVERAGE_THRESHOLD}%)..." >&2
+        COV_OUTPUT=$(_run_with_timeout "coverage" bash -c "$COVERAGE_CMD" 2>&1 || true)
+        COV_PCT=$(echo "$COV_OUTPUT" | grep -oE '[0-9]+(\.[0-9]+)?%' | tail -1 | tr -d '%')
+        if [ -z "$COV_PCT" ]; then
+            echo -e "${YELLOW}⚠ COVERAGE: could not parse a percentage from COVERAGE_CMD output. Recording NO_COVERAGE.${RESET}" >&2
+            _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "warn:no_coverage_parse"
+        else
+            # Integer-truncate for a dependency-free comparison (e.g. 79.9 -> 79).
+            COV_INT=${COV_PCT%.*}
+            if [ "${COV_INT:-0}" -lt "$COVERAGE_THRESHOLD" ] 2>/dev/null; then
+                echo -e "${RED}GATE BLOCK: coverage ${COV_PCT}% < ${COVERAGE_THRESHOLD}% threshold.${RESET}" >&2
+                OUTCOME="block:coverage"
+                _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
+                exit 1
+            fi
+            echo -e "${GREEN}GATE: coverage ${COV_PCT}% ≥ ${COVERAGE_THRESHOLD}%.${RESET}" >&2
+        fi
+    else
+        echo "GATE: no COVERAGE_CMD configured — recording NO_COVERAGE (set it at init to enforce the coverage gate)." >&2
+        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "warn:no_coverage_cmd"
+    fi
 elif [ "$RUN_TESTS" != "true" ] && [ ${#TEST_RUNNERS[@]} -gt 0 ]; then
-    echo "GATE: tests skipped (--run-tests=false). Pass --run-tests=true to enable." >&2
+    echo "GATE: tests opt-in at pre-commit (--run-tests=false). Mandatory at pre-push and on CORE_FILES changes." >&2
     echo "GATE: queued runners (not executed): ${TEST_RUNNERS[*]}" >&2
 fi
 
@@ -503,7 +678,7 @@ if $HAS_FRONTEND && [ -n "$FRONTEND_TYPE_CMD" ]; then
     fi
 fi
 
-# ── STEP 8: ALL CHECKS PASSED — advance ledger ────────────────────────────────
+# ── STEP 8: ALL CHECKS PASSED — write receipt + advance ledger ────────────────
 # CRITICAL: last_pass_sha is written ONLY here, after all checks exit 0.
 # Never write it on entry or on cold-start — a mid-run block would poison the ledger.
 if [ -f "$GATE_STATE" ]; then
@@ -514,7 +689,15 @@ if [ -f "$GATE_STATE" ]; then
     rm -f "$SESSION_SPEND"
 fi
 
+# Write the fingerprint receipt keyed by COMMIT_TREE_FP so pre-push can verify
+# this exact tree was gated. Pre-commit writes the index tree; a no-receipt
+# pre-push that reaches here writes its own (HEAD tree) receipt.
+if [ -n "$COMMIT_TREE_FP" ]; then
+    _receipt_write "$COMMIT_TREE_FP" "$CURRENT_BRANCH"
+    echo -e "${GREEN}GATE: receipt written for tree ${COMMIT_TREE_FP:0:12}.${RESET}" >&2
+fi
+
 _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "pass"
 
-echo -e "${GREEN}GATE PASS: all checks clean | branch=${CURRENT_BRANCH} | mode=${SCAN_MODE} | token=${TOTAL_SPENT}/${TOKEN_BUDGET}${RESET}" >&2
+echo -e "${GREEN}GATE PASS: all checks clean | branch=${CURRENT_BRANCH} | mode=${SCAN_MODE} | tier3=${CORE_FILES_TOUCHED} | token=${TOTAL_SPENT}/${TOKEN_BUDGET}${RESET}" >&2
 exit 0

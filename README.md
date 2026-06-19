@@ -26,13 +26,20 @@ ai-dev-workflow/
     └── basket-2-greenfield/     ← For teams starting brand-new projects
 ```
 
-## 🧪 Pre-Commit Testing (Opt-In)
+## 🧪 Testing — Opt-In at Commit, Mechanical at Push
 
-To keep your commits blazingly fast, global test suites (like `pytest` or `npm test`) are **skipped by default** during the pre-commit hook.
+Tests are **opt-in at pre-commit** to keep day-to-day commits fast, but **mandatory and
+mechanical** at the enforcement boundaries — code cannot leave a machine or merge untested.
 
-* **To run tests:** You must explicitly pass the `--run-tests=true` flag in your commit message.
-  * *Example:* `git commit -m "feat: added login logic --run-tests=true"`
-* If you omit this flag, the gate will only run linting and formatting checks to preserve your momentum.
+| Stage | Tests run? |
+|---|---|
+| `git commit` (normal) | Opt-in — add `--run-tests=true` to the commit message |
+| `git commit` touching a **CORE_FILES** path | Always (full suite, forced) |
+| `git push` | Always (full suite, or a verified pre-commit receipt) |
+| CI (`.github/workflows/gate.yml`) | Always (authoritative backstop) |
+
+Example: `git commit -m "feat: added login logic --run-tests=true"`. A coverage gate
+(default 80%) blocks when configured and unmet. See each basket README for details.
 
 ## Tooling Coverage
 

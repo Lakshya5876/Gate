@@ -51,15 +51,19 @@ with your repository in V1. Contact the platform team for monorepo governance as
 
 ## Installation
 
-**Step 1 — Clone ai-dev-workflow**
+The installer always writes into **the repository you are standing in** (it resolves the
+target with `git rev-parse --show-toplevel`). So you clone the framework once, then run it
+*from inside your target repo* using the framework's path. Do **not** run it from inside the
+`ai-dev-workflow` clone — that would govern the framework itself.
+
+**Step 1 — Clone the framework once (anywhere)**
 ```bash
-git clone <repository_url>
-cd ai-dev-workflow
+git clone <repository_url> ~/tools/ai-dev-workflow
 ```
 
-**Step 2 — Verify LOC ceiling (in your target repository)**
-Navigate to your target repository and run:
+**Step 2 — Enter your target repository and verify the LOC ceiling**
 ```bash
+cd /path/to/your-target-repo
 find . -type f \
   -not -path "*/.git/*" \
   -not -path "*/node_modules/*" \
@@ -71,37 +75,43 @@ find . -type f \
   -not -path "*/.next/*" \
   | xargs wc -l 2>/dev/null | tail -1
 ```
-Confirm your repo is under 1,000,000 LOC. If it is, continue.
+Confirm the `total` is under 1,000,000 LOC. If it is, continue.
 
-**Step 3 — Run the installer**
-From within the ai-dev-workflow directory, run:
-```bash
-./install.sh
-```
-This will scaffold `.claude/`, `.githooks/`, and copy governance files into your target repository.
-
-**Step 4 — Copy the guide into your repository**
-Copy `v1_claude_code_development_guide_existing.md` into the root of your target repository,
-keeping the filename exactly as-is. The init prompt reads it from disk — Claude Code uses it
-to generate the `CLAUDE.md` constitution tailored to your specific repository's architecture.
-
-**Step 5 — Execute the initialization package**
-Open Claude Code (CLI or Desktop app) inside your target repository. Create a new setup branch:
+**Step 3 — Create a setup branch and run the installer by its path**
 ```bash
 git checkout -b chore/claude-init
+~/tools/ai-dev-workflow/install.sh        # choose [b] brownfield when prompted
 ```
-Then locate the "SYSTEM PROMPT" section in `v1_implementation_package_existing.md` and paste **ONLY THAT SECTION** as your first message. Do not paste the entire document.
-Claude Code will run automated repository reconnaissance, map your existing architecture,
-freeze the current technical debt baseline, and wire all git hooks — one time, fully automated.
+The installer copies the dev guide + init package into your repo root, scaffolds `.claude/`
+(including an unpopulated `baseline.json`), wires `.githooks/`, and installs the CI parity
+workflow at `.github/workflows/gate.yml`.
+
+**Step 4 — Execute the initialization package**
+Open Claude Code (CLI or Desktop app) in your target repository. Locate the "SYSTEM PROMPT"
+section in `v1_implementation_package_existing.md` and paste **ONLY THAT SECTION** as your
+first message. Do not paste the entire document. Claude Code runs automated reconnaissance,
+maps your architecture, populates the debt baseline, and generates `CLAUDE.md` — one time,
+fully automated.
 
 After the init commit lands, your repository is a governed, hook-enforced agentic engineering
 environment. Every subsequent session operates under the constitution and enforcement layer
 established during init.
 
-## 🧪 Pre-Commit Testing (Opt-In)
+## 🧪 Testing — Opt-In at Commit, Mechanical at Push
 
-To keep your commits blazingly fast, global test suites (like `pytest` or `npm test`) are **skipped by default** during the pre-commit hook.
+Tests are **opt-in at pre-commit** so day-to-day commits stay fast, but **mandatory and
+mechanical** at the points that actually protect the codebase — code cannot leave your
+machine or merge untested.
 
-* **To run tests:** You must explicitly pass the `--run-tests=true` flag in your commit message.
-  * *Example:* `git commit -m "fix: corrected auth flow --run-tests=true"`
-* If you omit this flag, the gate will only run linting and formatting checks to preserve your momentum.
+| Stage | Tests run? | How |
+|---|---|---|
+| `git commit` (normal) | Opt-in | Add `--run-tests=true` to the commit message to run them |
+| `git commit` touching a **CORE_FILES** path | **Always (TIER-3)** | Full suite forced automatically — no flag needed |
+| `git push` | **Always** | Pre-push runs the full suite (or verifies a passing pre-commit receipt for the exact tree) |
+| CI (`.github/workflows/gate.yml`) | **Always** | Authoritative backstop even if local hooks were stripped |
+
+* **Run tests at commit:** `git commit -m "fix: corrected auth flow --run-tests=true"`
+* **Coverage gate:** when a coverage command is configured at init, coverage below the
+  threshold (default 80%) blocks the commit/push.
+* You cannot push untested code — the pre-push hook has no opt-out short of the audited,
+  24-hour `SKIP_GATE` bypass.
