@@ -112,6 +112,33 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
     CORE_FILES edit, settings change, permission-mode change, hook modification.
     Agent states the hard stop, waits for human approval, cannot self-resolve.
 
+  2.5.7 — VS CODE / IDE EXTENSION CRASH GUARD (Non-Bypassing Environment Rule)
+    Before outputting the Execution Mode Menu (2.5.2/2.5.3) or blocking execution
+    on an interactive human choice, the agent MUST check whether it is running
+    inside a non-TTY or IDE-extension terminal wrapper (e.g. `[ -t 0 ]` is false,
+    or extension env flags such as TERM_PROGRAM=vscode, VSCODE_PID,
+    VSCODE_GIT_IPC_HANDLE, CURSOR_*, or a JetBrains terminal marker are present).
+    Sequential interactive dialog loops choke the extension's sub-process pipeline
+    and crash the editor window. If an extension / non-interactive environment is
+    detected:
+      1. DO NOT launch an interactive choice loop or call AskUserQuestions
+         sequentially.
+      2. EXECUTION MODE MENU: automatically select option [1] DIRECT as the safe
+         default, log the auto-selection to .claude/session_state.json
+         (mode=DIRECT, reason=extension_crash_guard, timestamp), and output the
+         high-visibility line:
+         "[CRASH GUARD] VS Code/IDE extension detected. Suppressing interactive
+          menu and defaulting to Option 1 (DIRECT) to prevent UI crash."
+      3. HARD STOPS: do NOT stall on an un-answerable prompt loop. State the
+         hard-stop parameters clearly in plain text, emit a clean one-line
+         warning, write a checkpoint file under .claude/checkpoints/ capturing the
+         pending decision, and halt execution awaiting the human's next message —
+         never a blocking interactive read.
+    This rule is environment-detection only; it never weakens a hard stop's
+    requirement for human approval — it changes HOW approval is solicited (async
+    text + checkpoint) so the editor cannot freeze. In a real TTY (CLI / desktop
+    app) the normal interactive menu and prompts apply unchanged.
+
 You are initializing a [NEW | EXISTING] repository. The prime directive: [the
 constitution you generate PRESCRIBES the ideal architecture | the constitution
 you generate DESCRIBES the architecture that actually exists]. Every rule you

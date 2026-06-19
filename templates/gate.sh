@@ -31,7 +31,16 @@ SESSION_SPEND=".claude/session_spend.tmp"
 GIT_CACHE=".claude/git_cache.json"
 BASELINE=".claude/baseline.json"
 ORG_POLICY="${HOME}/.claude/org_policy.json"
-RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; RESET='\033[0m'
+
+# Color codes ONLY when stderr is a real terminal. In a VS Code / IDE extension
+# wrapper (non-TTY), raw ANSI escapes render as garbage and can freeze the editor
+# output pane — so emit plain text there. Works seamlessly in CLI, desktop app,
+# and IDE extensions alike.
+if [ -t 2 ]; then
+    RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; RESET='\033[0m'
+else
+    RED=''; YELLOW=''; GREEN=''; RESET=''
+fi
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 

@@ -196,10 +196,36 @@ cat > .githooks/pre-commit << 'PRECOMMIT'
 # SKIP_GATE=1 is a TTY-guarded bypass with git-note audit trail.
 set -euo pipefail
 
+# Detect an IDE-extension / non-interactive wrapper. In these environments an
+# interactive `read </dev/tty` either hangs the editor or fails on a missing
+# controlling terminal — so we must fall through gracefully, never block.
+_is_extension_or_non_tty() {
+    # Each condition is independent — explicit returns avoid &&/|| precedence traps.
+    [ ! -t 0 ]                              && return 0   # stdin not a terminal
+    [ ! -r /dev/tty ]                       && return 0   # no controlling terminal
+    [ "${TERM_PROGRAM:-}" = "vscode" ]      && return 0   # VS Code integrated terminal
+    [ -n "${VSCODE_PID:-}" ]                && return 0
+    [ -n "${VSCODE_GIT_IPC_HANDLE:-}" ]     && return 0
+    [ -n "${CURSOR_TRACE_ID:-}" ]           && return 0   # Cursor
+    case "${__CFBundleIdentifier:-}" in *vscode*|*cursor*) return 0 ;; esac
+    return 1
+}
+
 if [ "${SKIP_GATE:-0}" = "1" ]; then
-    # TTY guard: bypass must be typed interactively — cannot be piped
-    if [ ! -t 0 ] && [ ! -t 1 ]; then
-        echo "SKIP_GATE=1 is only valid in an interactive TTY. Aborting." >&2
+    # The bypass requires a typed reason at an interactive terminal. If we cannot
+    # safely prompt (extension/non-TTY), refuse with explicit instructions rather
+    # than hang the editor or emit control codes into the output pane.
+    if _is_extension_or_non_tty; then
+        echo "==============================================================" >&2
+        echo "[CRASH GUARD] SKIP_GATE bypass needs an interactive terminal." >&2
+        echo "An IDE-extension / non-TTY environment was detected, so the" >&2
+        echo "audited bypass prompt cannot run here (it would freeze the UI)." >&2
+        echo "" >&2
+        echo "To bypass the gate, run the commit from a real terminal:" >&2
+        echo "    SKIP_GATE=1 git commit -m \"your message\"" >&2
+        echo "and type the required bypass reason when prompted." >&2
+        echo "Otherwise, fix the gate findings and commit normally." >&2
+        echo "==============================================================" >&2
         exit 1
     fi
     read -r -p "Bypass reason (required): " BYPASS_REASON </dev/tty
@@ -209,7 +235,7 @@ if [ "${SKIP_GATE:-0}" = "1" ]; then
     fi
     COMMITTER_DATE=$(git var GIT_COMMITTER_DATE 2>/dev/null | awk '{print $1}')
     git notes --ref=refs/notes/bypasses append HEAD -m "BYPASS | date=${COMMITTER_DATE} | reason=${BYPASS_REASON}" 2>/dev/null || true
-    echo "⚠ Gate bypassed. Reason logged to refs/notes/bypasses." >&2
+    echo "Gate bypassed. Reason logged to refs/notes/bypasses." >&2
     exit 0
 fi
 
@@ -225,7 +251,13 @@ set -euo pipefail
 
 # Protected branches: exact names + release/* prefix. Matches gate.sh / spec §2.5.4.
 PROTECTED_EXACT="main master develop production"
-RED='\033[0;31m'; YELLOW='\033[1;33m'; RESET='\033[0m'
+# Color only on a real terminal — IDE-extension wrappers (non-TTY) would otherwise
+# render raw ANSI escapes as garbage and can freeze the editor output pane.
+if [ -t 2 ]; then
+    RED='\033[0;31m'; YELLOW='\033[1;33m'; RESET='\033[0m'
+else
+    RED=''; YELLOW=''; RESET=''
+fi
 
 while IFS=' ' read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
     REMOTE_BRANCH="${REMOTE_REF##refs/heads/}"
