@@ -1741,7 +1741,10 @@ MANDATORY (handled implicitly by /feature — zero human prompts):
      covering browser-side actionability and network contracts
   4. Use web-first async assertions (page.getByRole, expect(locator))
   5. Execute via the inferred runner (npx playwright test) autonomously
-  6. Both unit/integration AND Playwright suites must exit 0 before commit
+  6. Both unit/integration AND Playwright suites must exit 0 at pre-push and CI.
+     At pre-commit: tests are opt-in (add [run-tests] to the commit message),
+     except when the change touches a CORE_FILES path — then the full suite is
+     forced regardless (TIER-3 escalation via gate_state.json core_files[]).
 ```
 
 The pipeline NEVER asks the developer to write out test specifications,

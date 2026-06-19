@@ -46,4 +46,4 @@ Example: `git commit -m "feat: added login logic --run-tests=true"`. A coverage 
 | Tool | Status |
 |---|---|
 | Claude Code | V1 — Available now |
-| Cursor | Planned — future release |
+| Cursor | V1 — Available (IDE extension crash guard + full handoff; see handoff_cursor.md) |

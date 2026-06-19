@@ -932,7 +932,7 @@ gh pr create --title "feat: email validation on signup" \
 |-----------|------------|------------|
 | **No pushing to main/develop** | Pre-push hook BLOCKS | HARD BLOCK, no push until branch name fixed |
 | **No secrets in diffs** | Pre-commit hook scans | HARD BLOCK if credentials found |
-| **No bypassing tests** | Pre-commit hook runs tests | HARD BLOCK if tests fail (must fix code or SKIP_GATE) |
+| **Tests** | Tests are **opt-in at pre-commit** (add `[run-tests]` to message) | Mandatory + mechanical at **pre-push**, **CI**, and on any **CORE_FILES** change — HARD BLOCK if tests fail |
 | **Layer boundaries** | /audit scanner detects | HARD BLOCK if route calls repository directly |
 | **CORE_FILES changes trigger Tier 3** | gate.sh detects & routes | Automatic full test suite run (no choice) |
 | **Type-checker must pass** | Pre-commit gate checks | HARD BLOCK if type errors exist |
@@ -1065,11 +1065,11 @@ c540b43  fix: resolve fatal Appendix B ambiguity in B8/C8 alias step
 - **Fix:** Mandated `WORKING_TREE_FP` and `COMMIT_TREE_FP` as the only allowed names
 - **Lesson:** Any ambiguity in governance specs will be resolved incorrectly by an LLM
 
-#### **Bug 4: GitHub CDN 404 (IN PROGRESS)**
-- **Symptom:** `curl https://raw.githubusercontent.com/BankofLoyal/ai-dev-workflow/init_release/v1_release/...` returns 404
-- **Root cause:** Unknown. Could be: private repo, URL wrong, CDN cache lag, branch not fully synced
-- **Workaround:** install.sh now detects local clone and uses local files first, falls back to GitHub URLs
-- **Status:** Workaround in place (commit 4b0b3f6). Root cause TBD.
+#### **Bug 4: GitHub CDN 404 (RESOLVED — local-only install)**
+- **Symptom:** `curl https://raw.githubusercontent.com/BankofLoyal/ai-dev-workflow/...` returned 404
+- **Root cause:** Repo was private; CDN distribution was the wrong model regardless
+- **Resolution:** install.sh is now **local-only** (commit d5161c7). Run it from inside the target repo by absolute path: `cd <target-repo> && /path/to/ai-dev-workflow/install.sh`. All files copied via `cp` from `REPO_DIR`. No curl/wget, no CDN, no network dependency.
+- **Status:** Permanent fix. CDN distribution is not planned for V1.
 
 ### Code Quirks & Workarounds
 
@@ -1129,8 +1129,7 @@ ad06412  refactor(v1-release): move Appendix B from init packages into dev guide
 - Red-team audit: 3 scaling vectors hardened and verified mathematically
 
 **Known Blockers:**
-- GitHub CDN returning 404 for raw content URLs (workaround: local file fallback active)
-- No live 1M LOC test repo to validate framework end-to-end yet
+- No live 1M LOC test repo to validate framework end-to-end yet (Phase 2)
 
 ### Immediate Working Memory
 

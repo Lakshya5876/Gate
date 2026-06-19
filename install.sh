@@ -286,12 +286,24 @@ while IFS=' ' read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
         exit 1
     fi
 
-    # Check for unexpired bypass clock entries (24h policy)
+    # Bypass clock enforcement (24h policy):
+    #   active bypass (< 24h)  → WARN and allow push (audit trail still intact)
+    #   expired bypass (≥ 24h) → BLOCK push until the issue is fixed or a new bypass is opened
     if git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -q "BYPASS"; then
         BYPASS_DATE=$(git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -oE 'date=[0-9]+' | head -1 | cut -d= -f2)
         NOW_EPOCH=$(date +%s)
-        if [ -n "$BYPASS_DATE" ] && [ $(( NOW_EPOCH - BYPASS_DATE )) -lt 86400 ]; then
-            echo -e "${YELLOW}⚠ Active bypass within 24h window — pushing with audit note intact.${RESET}" >&2
+        if [ -n "$BYPASS_DATE" ]; then
+            BYPASS_AGE=$(( NOW_EPOCH - BYPASS_DATE ))
+            if [ "$BYPASS_AGE" -gt 86400 ]; then
+                echo -e "${RED}PRE-PUSH BLOCK: Bypass deadline expired.${RESET}" >&2
+                echo "A gate bypass was recorded $((BYPASS_AGE / 3600))h ago — the 24-hour resolution window has closed." >&2
+                echo "Fix the underlying issue and commit normally, OR open a new bypass window:" >&2
+                echo "    SKIP_GATE=1 git commit --allow-empty -m 'chore: extend bypass window — <reason>'" >&2
+                exit 1
+            else
+                REMAINING=$(( (86400 - BYPASS_AGE) / 3600 ))
+                echo -e "${YELLOW}⚠ Active bypass — pushing with audit note intact. Resolution deadline: ${REMAINING}h remaining.${RESET}" >&2
+            fi
         fi
     fi
 done

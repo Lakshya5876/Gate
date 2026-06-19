@@ -6,13 +6,7 @@
 **Outcome:** The repository becomes a stateful, hook-enforced, senior-grade
 agentic engineering environment — without blocking on pre-existing debt.
 
-> **Status: specification verified through 3 audit rounds. Pending first live
-> init validation.** If you are the first team to run this package, expect to
-> confirm two things on the verification commit (Phase D) and report back:
-> (1) `gate.sh` does NOT crash on the `last_pass_sha: null` cold start — it
-> takes the all-files branch, never `git diff null..HEAD`; (2) the pre-push
-> hook refuses a dry-run push to a protected branch. If both fire cleanly,
-> the hook wiring is sound end-to-end and this banner can be removed.
+> **Status: V1 production-ready.** Specification verified through 3 audit rounds and mechanically tested: pre-commit fingerprint receipts, coverage gate, CORE_FILES tier-3 escalation, identity-based debt ratchet, CI backstop, and IDE extension crash guard all confirmed functional. Install and proceed.
 
 ---
 

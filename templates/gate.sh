@@ -589,6 +589,54 @@ if $HAS_BACKEND && [ -n "$TYPE_CMD" ]; then
     fi
 fi
 
+# ── STEP 6.5: LAYER BOUNDARY SCAN ────────────────────────────────────────────
+# Heuristic grep scan scoped to CHANGED_FILES only (never full-repo).
+# Catches the two most common AI-generated layer violations:
+#   1. SQL in presentation/routes layer (belongs only in repositories/)
+#   2. HTTP framework imports in application/services layer (belongs only in routes/)
+# Fires only if changed files land in known layer directories — stack-agnostic.
+if $HAS_BACKEND && [ -n "$CHANGED_FILES" ]; then
+    LAYER_VIOLATIONS=""
+    while IFS= read -r _lf; do
+        [ -z "$_lf" ] || [ ! -f "$_lf" ] && continue
+
+        # Routes / controllers / presentation layer: must contain NO raw SQL
+        if echo "$_lf" | grep -qiE '/(routes?|controllers?|presentation|views?|handlers?)/'; then
+            _SQL=$(grep -nE '(SELECT|INSERT|UPDATE|DELETE|cursor\.execute|executemany|psycopg2\.connect)' "$_lf" 2>/dev/null | grep -v '^\s*#\|placeholder\|example' | head -3 || true)
+            if [ -n "$_SQL" ]; then
+                LAYER_VIOLATIONS="${LAYER_VIOLATIONS}ROUTES_HAS_SQL ${_lf}:\n${_SQL}\n"
+            fi
+        fi
+
+        # Services / application layer: must contain NO raw SQL
+        if echo "$_lf" | grep -qiE '/(services?|application|use.?cases?)/'; then
+            _SQL=$(grep -nE '(SELECT|INSERT|UPDATE|DELETE|cursor\.execute|executemany|psycopg2\.connect)' "$_lf" 2>/dev/null | grep -v '^\s*#\|placeholder\|example' | head -3 || true)
+            if [ -n "$_SQL" ]; then
+                LAYER_VIOLATIONS="${LAYER_VIOLATIONS}SERVICE_HAS_SQL ${_lf}:\n${_SQL}\n"
+            fi
+        fi
+
+        # Services / application layer: must NOT import HTTP framework directly
+        if echo "$_lf" | grep -qiE '/(services?|application|use.?cases?)/'; then
+            _HTTP=$(grep -nE '^(from fastapi|import fastapi|from flask|import flask|from django\.http|APIRouter|@app\.(get|post|put|delete|patch)\()' "$_lf" 2>/dev/null | head -3 || true)
+            if [ -n "$_HTTP" ]; then
+                LAYER_VIOLATIONS="${LAYER_VIOLATIONS}SERVICE_HAS_HTTP ${_lf}:\n${_HTTP}\n"
+            fi
+        fi
+    done <<< "$CHANGED_FILES"
+
+    if [ -n "$LAYER_VIOLATIONS" ]; then
+        echo -e "${RED}GATE BLOCK: Layer boundary violation(s) detected in changed files:${RESET}" >&2
+        echo -e "$LAYER_VIOLATIONS" | head -40 >&2
+        echo "SQL belongs in repositories/ only. HTTP framework imports belong in routes/ only." >&2
+        echo "Move the violating code to the correct layer before committing." >&2
+        OUTCOME="block:layer-boundary"
+        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
+        exit 1
+    fi
+    echo "GATE: layer boundary scan clean." >&2
+fi
+
 _run_test_queue() {
     local runner_idx=0 total=${#TEST_RUNNERS[@]}
     local TIMEOUT_SEC TEST_TIMEOUT
