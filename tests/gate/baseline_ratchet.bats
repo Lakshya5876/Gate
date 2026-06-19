@@ -30,7 +30,9 @@ teardown() {
     printf 'x=1\n' > src/new_module.py
     git add src/new_module.py
     run run_gate GATE_TRIGGER=pre-commit \
-        LINT_CMD='echo "src/new_module.py:1:1: E999 new violation"; exit 1'
+        LINT_CMD='echo "src/new_module.py:1:1: E999 new violation"; exit 1' \
+        TYPE_CMD='true' \
+        COMPLEXITY_CMD='true'
     [ "$status" -eq 1 ]
     [[ "$output" == *"new lint findings not in baseline"* ]]
 }
