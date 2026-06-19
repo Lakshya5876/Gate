@@ -17,7 +17,10 @@ def charge():
     raise HTTPException(status_code=400, detail="bad")
 EOF
     git add app/services/billing.py
-    run run_gate GATE_TRIGGER=pre-commit LINT_CMD='true'
+    run run_gate GATE_TRIGGER=pre-commit \
+        LINT_CMD='true' \
+        TYPE_CMD='true' \
+        COMPLEXITY_CMD='true'
     [ "$status" -eq 1 ]
     [[ "$output" == *"Layer boundary violation"* ]]
     [[ "$output" == *"SERVICE_HAS_HTTP"* ]]
@@ -30,7 +33,10 @@ def list_users(conn):
     return conn.execute("SELECT id FROM users")
 EOF
     git add app/routes/users.py
-    run run_gate GATE_TRIGGER=pre-commit LINT_CMD='true'
+    run run_gate GATE_TRIGGER=pre-commit \
+        LINT_CMD='true' \
+        TYPE_CMD='true' \
+        COMPLEXITY_CMD='true'
     [ "$status" -eq 1 ]
     [[ "$output" == *"ROUTES_HAS_SQL"* ]]
 }

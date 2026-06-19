@@ -20,7 +20,11 @@ teardown() {
 @test "CORE_FILES touch forces tier-3 and mandatory tests at pre-commit" {
     echo "DEBUG=true" > app/config.py
     git add app/config.py
-    run run_gate GATE_TRIGGER=pre-commit TEST_CMD='echo tier3-forced; exit 1'
+    run run_gate GATE_TRIGGER=pre-commit \
+        LINT_CMD='true' \
+        TYPE_CMD='true' \
+        COMPLEXITY_CMD='true' \
+        TEST_CMD='echo tier3-forced; exit 1'
     [ "$status" -eq 1 ]
     [[ "$output" == *"TIER-3"* ]]
     [[ "$output" == *"tier3-forced"* ]]

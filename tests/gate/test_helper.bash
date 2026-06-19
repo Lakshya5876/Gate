@@ -34,11 +34,13 @@ teardown_gate_repo() {
 run_gate() {
     # Usage: run_gate [extra env assignments...]
     # Caller must be inside TEST_REPO.
-    env "$@" GATE_STATE=".claude/gate_state.json" bash .githooks/gate.sh
+    # 2>&1: gate.sh writes everything to stderr; redirect so bats `run` captures it in $output.
+    env "$@" GATE_STATE=".claude/gate_state.json" bash .githooks/gate.sh 2>&1
 }
 
 run_pre_push_hook() {
     # Minimal pre-push bypass-clock logic mirrored from install.sh (for isolated testing).
+    # 2>&1: messages go to stderr; redirect so bats `run` captures them in $output.
     env bash -c '
 set -euo pipefail
 if git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -q "BYPASS"; then
@@ -52,5 +54,5 @@ if git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -q "BYPASS";
         fi
     fi
 fi
-'
+' 2>&1
 }

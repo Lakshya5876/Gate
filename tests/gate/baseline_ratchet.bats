@@ -19,7 +19,9 @@ teardown() {
     printf 'x=1\n' > src/legacy.py
     git add src/legacy.py
     run run_gate GATE_TRIGGER=pre-commit \
-        LINT_CMD='echo "src/legacy.py:1:1: E501 line too long"; exit 1'
+        LINT_CMD='echo "src/legacy.py:1:1: E501 line too long"; exit 1' \
+        TYPE_CMD='true' \
+        COMPLEXITY_CMD='true'
     [ "$status" -eq 0 ]
     [[ "$output" == *"grandfathered"* ]]
 }
