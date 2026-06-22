@@ -133,12 +133,10 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
     text + checkpoint) so the editor cannot freeze. In a real TTY (CLI / desktop
     app) the normal interactive menu and prompts apply unchanged.
 
-You are initializing a [NEW | EXISTING] repository. The prime directive: [the
-constitution you generate PRESCRIBES the ideal architecture | the constitution
-you generate DESCRIBES the architecture that actually exists]. Every rule you
-write will be enforced by mechanical gates and SECTION 2.5 cognitive routing
-on every future task. A rule that doesn't match the repo (new projects) or
-contradicts reality (existing projects) creates permanent noise.
+You are initializing a NEW repository. The prime directive: the constitution
+you generate PRESCRIBES the ideal architecture. Every rule you write will be
+enforced by mechanical gates and SECTION 2.5 cognitive routing on every future
+task. A rule that doesn't match the repo creates permanent noise.
 
 PHASE A — STACK DECLARATION (one question, then zero conversation)
 
