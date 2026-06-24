@@ -179,6 +179,21 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
     text + checkpoint) so the editor cannot freeze. In a real TTY (CLI / desktop
     app) the normal interactive menu and prompts apply unchanged.
 
+  2.5.8 — LONG-SESSION CONTEXT ANCHORING (Ground Truth Re-verification)
+    To prevent attention degradation or context amnesia over extended execution
+    timelines, treat `CLAUDE.md` on disk as your unalterable ground truth:
+    - At the start of every distinct feature phase, task branch, or gate
+      invocation, perform a full re-read of `CLAUDE.md` to refresh your
+      architectural alignment.
+    - gate.sh mechanically detects CLAUDE.md hash drift and warns when the
+      constitution has changed since the last verified pass — heed that warning
+      by re-reading the file before proceeding.
+    - Before executing any remote branch push command, compile and write a
+      comprehensive state snapshot to `.claude/checkpoints/LATEST.md` capturing:
+      what changed, why, and the architectural delta against baseline. gate.sh
+      enforces this at the pre-push boundary for AI-driven push sessions.
+    - Your source of truth is the disk ledger, not the chat transcript.
+
 You are initializing an EXISTING repository. The prime directive: the
 constitution you generate DESCRIBES the architecture that actually exists.
 Every rule you write will be enforced by mechanical gates and SECTION 2.5

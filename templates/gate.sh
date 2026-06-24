@@ -97,6 +97,25 @@ with open('$GATE_STATE', 'w') as f:
 " 2>/dev/null
 }
 
+_verify_context_anchoring() {
+    # Hash-drift detection: if CLAUDE.md changed since the last gate pass, the
+    # agent may be operating on stale architectural context. Warns once per change
+    # cycle — auto-updates the stored hash so the warning doesn't repeat every commit.
+    [ -f "CLAUDE.md" ] || return 0
+    [ -f "$GATE_STATE" ] || return 0
+    _CA_HASH=$(sha256sum CLAUDE.md 2>/dev/null | awk '{print $1}' || \
+               shasum -a 256 CLAUDE.md 2>/dev/null | awk '{print $1}' || echo "")
+    [ -z "$_CA_HASH" ] && return 0
+    _CA_STORED=$(_json_get "$GATE_STATE" "claude_md_hash")
+    if [ -z "$_CA_STORED" ] || [ "$_CA_STORED" = "null" ]; then
+        _json_set "$GATE_STATE" "claude_md_hash" "\"$_CA_HASH\""
+        echo "GATE: CLAUDE.md anchored (${_CA_HASH:0:12})." >&2
+    elif [ "$_CA_STORED" != "$_CA_HASH" ]; then
+        echo -e "${YELLOW}⚠ GATE: CLAUDE.md changed since last verified pass — re-read it to refresh architectural alignment before proceeding.${RESET}" >&2
+        _json_set "$GATE_STATE" "claude_md_hash" "\"$_CA_HASH\""
+    fi
+}
+
 # ── Fingerprint receipt helpers (spec §4.2 — two distinct forms) ──────────────
 # COMMIT_TREE_FP keys receipts (pre-commit writes, pre-push verifies).
 # Receipts are pruned to the most recent 50 to bound ledger growth.
@@ -169,6 +188,9 @@ trap '_crash_handler ${LINENO} $?' ERR
 if [ ! -f "$GATE_STATE" ]; then
     echo -e "${YELLOW}⚠ gate_state.json not found — running cold start (full scan)${RESET}" >&2
 fi
+
+# ── CLAUDE.md context anchoring ───────────────────────────────────────────────
+_verify_context_anchoring
 
 # ── STEP 1: BRANCH VALIDATION ─────────────────────────────────────────────────
 CURRENT_BRANCH=$(git branch --show-current 2>/dev/null || echo "")
@@ -365,6 +387,27 @@ if [ "$GATE_TRIGGER" = "pre-push" ]; then
     RUN_TESTS="true"
 else
     COMMIT_TREE_FP=$(git write-tree 2>/dev/null || echo "")
+fi
+
+# ── STEP 4.6: PRE-PUSH CHECKPOINT GATE ───────────────────────────────────────
+# Enforced only when an active Claude session is pushing (SESSION_SPEND_VAL > 0).
+# Human pushes skip this — checkpoint discipline targets AI-driven workflows.
+if [ "$GATE_TRIGGER" = "pre-push" ] && [ "${SESSION_SPEND_VAL:-0}" -gt 0 ] 2>/dev/null; then
+    _CKPT=".claude/checkpoints/LATEST.md"
+    if [ ! -f "$_CKPT" ]; then
+        echo -e "${RED}PUSH GATING FAILURE: A structured checkpoint summary must be written to .claude/checkpoints/LATEST.md before crossing a remote push boundary.${RESET}" >&2
+        echo "Write a checkpoint summarising what changed, why, and the architectural delta against baseline." >&2
+        OUTCOME="block:no-checkpoint"
+        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
+        exit 1
+    fi
+    _CKPT_LAST_COMMIT=$(git log -1 --format=%ct 2>/dev/null || echo "0")
+    _CKPT_MTIME=$(stat -f %m "$_CKPT" 2>/dev/null || stat -c %Y "$_CKPT" 2>/dev/null || echo "0")
+    if [ "${_CKPT_MTIME:-0}" -lt "${_CKPT_LAST_COMMIT:-1}" ] 2>/dev/null; then
+        echo -e "${YELLOW}⚠ GATE: checkpoint predates the latest commit — update .claude/checkpoints/LATEST.md to reflect current changes before pushing.${RESET}" >&2
+    else
+        echo "GATE: checkpoint verified." >&2
+    fi
 fi
 
 # Mechanical test enforcement: push and CI always run tests; CORE_FILES always run tests.
