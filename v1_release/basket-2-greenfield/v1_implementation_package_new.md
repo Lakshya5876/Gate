@@ -145,7 +145,9 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
     - Before executing any remote branch push command, compile and write a
       comprehensive state snapshot to `.claude/checkpoints/LATEST.md` capturing:
       what changed, why, and the architectural delta against baseline. gate.sh
-      enforces this at the pre-push boundary for AI-driven push sessions.
+      enforces this as a universal structural invariant — any push containing
+      source file changes is hard-blocked unless a valid checkpoint exists.
+      This applies to all pushers with no session-type or environment exceptions.
     - Your source of truth is the disk ledger, not the chat transcript.
 
   2.5.9 — DYNAMIC INTERROGATION & COMPULSORY BRAINSTORMING
@@ -163,9 +165,9 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
          to validate assumptions. Do not assume or guess missing
          specifications — demand clarity before a single line of code is
          written to disk.
-    gate.sh detects Tier 3+ footprints (≥5 staged files from an active
-    session) and warns if no checkpoint exists, reinforcing this rule at
-    the mechanical layer.
+    gate.sh enforces this as a non-bypassable pre-commit HARD BLOCK: ≥5
+    staged files with no `.claude/checkpoints/LATEST.md` aborts the commit
+    with exit code 1 (rule applies universally — no session-type bypass).
 
 You are initializing a NEW repository. The prime directive: the constitution
 you generate PRESCRIBES the ideal architecture. Every rule you write will be

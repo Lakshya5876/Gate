@@ -155,14 +155,30 @@ except Exception:
 }
 
 _ensure_graph_freshness() {
-    # Non-blocking: when the change set touches structural source files and the
-    # graph toolchain is installed, kick off a background index rebuild so the
-    # agent navigates a current graph on its next invocation.
+    # Non-blocking background index rebuild when structural source files change.
+    # File-locking prevents concurrent SQLite writes across parallel gate sessions.
     [ -f ".mcp.json" ] || return 0
     command -v code-review-graph >/dev/null 2>&1 || return 0
     _GF_HIT=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|py|go|java)$' | head -1)
     [ -n "$_GF_HIT" ] || return 0
-    nohup code-review-graph build > /dev/null 2>&1 &
+    _GF_LOCK=".claude/graph.lock"
+    # Check for an active build: read PID from lock file and test if process is alive
+    if [ -f "$_GF_LOCK" ]; then
+        _GF_PID=$(cat "$_GF_LOCK" 2>/dev/null)
+        if [ -n "$_GF_PID" ] && kill -0 "$_GF_PID" 2>/dev/null; then
+            echo -e "${YELLOW}[GRAPH GUARD] Indexing process already locked by a parallel session. Skipping execution to prevent SQLite lock collisions.${RESET}" >&2
+            return 0
+        fi
+        rm -f "$_GF_LOCK"  # Stale lock from a previously completed or crashed build
+    fi
+    if command -v flock >/dev/null 2>&1; then
+        # flock(1) available (Linux): atomic exclusive lock held for the build's duration
+        ( flock -n 9 2>/dev/null || exit 0; code-review-graph build > /dev/null 2>&1 ) 9>"$_GF_LOCK" &
+    else
+        # Fallback (macOS/POSIX): PID-based lock file; background process cleans it on exit
+        nohup bash -c "code-review-graph build > /dev/null 2>&1; rm -f '$_GF_LOCK'" > /dev/null 2>&1 &
+        echo $! > "$_GF_LOCK"
+    fi
     echo -e "${GREEN}GATE: graph index refreshing in background.${RESET}" >&2
 }
 
@@ -379,16 +395,18 @@ except Exception:
     fi
 fi
 
-# ── STEP 4.4: TIER 3+ BRAINSTORMING ADVISORY ─────────────────────────────────
-# If an active Claude session is staging a large file footprint with no checkpoint,
-# the session may have skipped the 2.5.9 brainstorming phase. Warns — cannot hard-
-# block here because brainstorming must happen BEFORE file writes; gate.sh runs
-# after. The pre-push checkpoint gate (STEP 4.6) is the hard enforcement boundary.
-if [ "$GATE_TRIGGER" = "pre-commit" ] && [ "${SESSION_SPEND_VAL:-0}" -gt 0 ] 2>/dev/null; then
+# ── STEP 4.4: TIER 3+ BRAINSTORMING HARD BLOCK ───────────────────────────────
+# Universal invariant (no session-type bypass): ≥5 staged files with no
+# brainstorming checkpoint aborts the commit. Prevents unverified code traces
+# from entering the local history log regardless of who is committing.
+if [ "$GATE_TRIGGER" = "pre-commit" ]; then
     _T3_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || echo "0")
     _T3_CKPT=".claude/checkpoints/LATEST.md"
     if [ "${_T3_COUNT:-0}" -ge 5 ] && [ ! -f "$_T3_CKPT" ]; then
-        echo -e "${YELLOW}⚠ GATE: ${_T3_COUNT} files in change footprint — Tier 3+ complexity. If no brainstorming phase was executed for this task (rule 2.5.9), write a checkpoint to .claude/checkpoints/LATEST.md before pushing.${RESET}" >&2
+        echo -e "${RED}PRE-COMMIT BLOCK: Tier 3+ change footprint (${_T3_COUNT} files) with no brainstorming checkpoint. Write a design brief to .claude/checkpoints/LATEST.md before committing (rule 2.5.9).${RESET}" >&2
+        OUTCOME="block:no-brainstorm-checkpoint"
+        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
+        exit 1
     fi
 fi
 
@@ -415,23 +433,27 @@ else
 fi
 
 # ── STEP 4.6: PRE-PUSH CHECKPOINT GATE ───────────────────────────────────────
-# Enforced only when an active Claude session is pushing (SESSION_SPEND_VAL > 0).
-# Human pushes skip this — checkpoint discipline targets AI-driven workflows.
-if [ "$GATE_TRIGGER" = "pre-push" ] && [ "${SESSION_SPEND_VAL:-0}" -gt 0 ] 2>/dev/null; then
+# Universal structural invariant: any push containing source file changes
+# requires a verified checkpoint in .claude/checkpoints/LATEST.md. No bypass
+# based on session type, terminal flags, or session wrappers is permitted.
+if [ "$GATE_TRIGGER" = "pre-push" ]; then
     _CKPT=".claude/checkpoints/LATEST.md"
-    if [ ! -f "$_CKPT" ]; then
-        echo -e "${RED}PUSH GATING FAILURE: A structured checkpoint summary must be written to .claude/checkpoints/LATEST.md before crossing a remote push boundary.${RESET}" >&2
-        echo "Write a checkpoint summarising what changed, why, and the architectural delta against baseline." >&2
-        OUTCOME="block:no-checkpoint"
-        _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
-        exit 1
-    fi
-    _CKPT_LAST_COMMIT=$(git log -1 --format=%ct 2>/dev/null || echo "0")
-    _CKPT_MTIME=$(stat -f %m "$_CKPT" 2>/dev/null || stat -c %Y "$_CKPT" 2>/dev/null || echo "0")
-    if [ "${_CKPT_MTIME:-0}" -lt "${_CKPT_LAST_COMMIT:-1}" ] 2>/dev/null; then
-        echo -e "${YELLOW}⚠ GATE: checkpoint predates the latest commit — update .claude/checkpoints/LATEST.md to reflect current changes before pushing.${RESET}" >&2
-    else
-        echo "GATE: checkpoint verified." >&2
+    _PP_SRC=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|py|go|java|rb|rs|c|cpp|h|cs|swift|kt)$' | head -1)
+    if [ -n "$_PP_SRC" ]; then
+        if [ ! -f "$_CKPT" ]; then
+            echo -e "${RED}PUSH GATING FAILURE: This push modifies source files. A structured checkpoint summary must be written to .claude/checkpoints/LATEST.md before crossing a remote push boundary.${RESET}" >&2
+            echo "Write a checkpoint summarising what changed, why, and the architectural delta against baseline." >&2
+            OUTCOME="block:no-checkpoint"
+            _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
+            exit 1
+        fi
+        _CKPT_LAST_COMMIT=$(git log -1 --format=%ct 2>/dev/null || echo "0")
+        _CKPT_MTIME=$(stat -f %m "$_CKPT" 2>/dev/null || stat -c %Y "$_CKPT" 2>/dev/null || echo "0")
+        if [ "${_CKPT_MTIME:-0}" -lt "${_CKPT_LAST_COMMIT:-1}" ] 2>/dev/null; then
+            echo -e "${YELLOW}⚠ GATE: checkpoint predates the latest commit — update .claude/checkpoints/LATEST.md to reflect current changes before pushing.${RESET}" >&2
+        else
+            echo "GATE: checkpoint verified." >&2
+        fi
     fi
 fi
 
