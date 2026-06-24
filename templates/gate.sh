@@ -251,17 +251,31 @@ TODAY=$(date +%Y-%m-%d)
 GATE_TRIGGER="${GATE_TRIGGER:-pre-commit}"   # pre-commit or pre-push hook sets this
 NOW_ISO=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 
-# Read org-level budget ceiling
+# Read org-level budget ceiling — daily budget = WEEKLY_LIMIT × DAILY_BUDGET_PCT ÷ 100
 ORG_BUDGET=""
 if [ -f "$ORG_POLICY" ]; then
-    ORG_BUDGET=$(python3 -c "import json; d=json.load(open('$ORG_POLICY')); print(d.get('TOKEN_BUDGET',''))" 2>/dev/null || echo "")
+    ORG_BUDGET=$(python3 -c "
+import json, sys
+try:
+    d = json.load(open('$ORG_POLICY'))
+    weekly = int(d.get('WEEKLY_LIMIT') or 0)
+    pct    = int(d.get('DAILY_BUDGET_PCT') or 20)
+    if weekly > 0:
+        print(int(weekly * pct / 100))
+    elif d.get('TOKEN_BUDGET'):
+        print(int(d['TOKEN_BUDGET']))
+except Exception:
+    pass
+" 2>/dev/null || echo "")
 fi
 
 TOKEN_BUDGET=""
 if [ -f "$GATE_STATE" ]; then
     TOKEN_BUDGET=$(_json_get "$GATE_STATE" "token.token_budget")
 fi
-TOKEN_BUDGET="${TOKEN_BUDGET:-50000}"
+# Fallback: 200k/day if org policy absent and no repo-level override
+[ -z "$TOKEN_BUDGET" ] || [ "$TOKEN_BUDGET" = "null" ] && TOKEN_BUDGET=""
+TOKEN_BUDGET="${TOKEN_BUDGET:-200000}"
 
 # Org ceiling wins if set and lower than repo setting
 if [ -n "$ORG_BUDGET" ] && [ "$ORG_BUDGET" -lt "$TOKEN_BUDGET" ] 2>/dev/null; then

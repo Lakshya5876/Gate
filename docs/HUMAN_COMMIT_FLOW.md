@@ -42,7 +42,7 @@ A typical clean commit on a feature branch:
 ```
 GATE: scope=incremental | backend=true | frontend=false
 GATE: layer boundary scan clean.
-GATE PASS: all checks clean | branch=feature/billing-fix | mode=incremental | tier3=false | token=12400/50000
+GATE PASS: all checks clean | branch=feature/billing-fix | mode=incremental | tier3=false | token=12400/200000
 [feature/billing-fix abc1234] fix: correct null check in billing
 ```
 
@@ -51,7 +51,7 @@ A first commit in a new session (cold start):
 ```
 GATE: cold start — full scan
 GATE: layer boundary scan clean.
-GATE PASS: all checks clean | branch=feature/billing-fix | mode=cold | tier3=false | token=0/50000
+GATE PASS: all checks clean | branch=feature/billing-fix | mode=cold | tier3=false | token=0/200000
 ```
 
 ---

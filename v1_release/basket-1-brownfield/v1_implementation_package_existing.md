@@ -60,8 +60,12 @@ agentic engineering environment — without blocking on pre-existing debt.
    from the repo root (e.g. `pytest`, `jest`, `ruff`, `eslint`, `mypy`, `tsc`).
 4. Clone the governance framework and run the installer from within this repository's root:
    ```bash
-   git clone https://github.com/BankofLoyal/ai-dev-workflow /tmp/ai-dev-workflow
-   /tmp/ai-dev-workflow/install.sh
+   git clone https://github.com/BankofLoyal/ai-dev-workflow ~/ai-dev-workflow
+   ~/ai-dev-workflow/install.sh
+   ```
+   To remove all framework traces if you want:
+   ```bash
+   ~/ai-dev-workflow/uninstall.sh
    ```
 5. **Permission-mode check:** never run the init (or any session in a governed
    repo) with `--dangerously-skip-permissions`. The generated settings pin

@@ -18,8 +18,8 @@
   "_core_files_comment": "Glob patterns (fnmatch) for architecture-critical files. Any change touching a match forces TIER-3: full test suite + mandatory test run even at pre-commit. Edited only via human PR.",
 
   "token": {
-    "_comment": "token_budget is READ from ~/.claude/org_policy.json first. Value here is repo-level ceiling and must be <= org ceiling.",
-    "token_budget": 50000,
+    "_comment": "Daily budget computed from ~/.claude/org_policy.json: WEEKLY_LIMIT × DAILY_BUDGET_PCT ÷ 100. Set token_budget here only for a repo-level override (must be ≤ org ceiling). null = use org policy.",
+    "token_budget": null,
     "token_spent_today": 0,
     "token_last_reset": null,
     "token_audit_log": []

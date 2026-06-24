@@ -24,7 +24,8 @@ FRAMEWORK_VERSION="v1"
 FRAMEWORK_SEMVER="1.0.0"
 GRAPH_PACKAGE="code-review-graph==2.3.6"
 ORG_POLICY_PATH="${HOME}/.claude/org_policy.json"
-DEFAULT_TOKEN_BUDGET=50000
+DEFAULT_WEEKLY_LIMIT=1000000
+DEFAULT_DAILY_BUDGET_PCT=20
 
 RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; BLUE='\033[0;34m'; RESET='\033[0m'
 
@@ -270,6 +271,14 @@ _require python3 "Install Python 3.8+ from https://python.org/"
 git rev-parse --git-dir >/dev/null 2>&1 || _error "Not inside a git repository. Run 'git init' first."
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
+
+# Guard: refuse to govern the ai-dev-workflow repo itself
+if [ "$REPO_ROOT" = "$SCRIPT_DIR" ]; then
+    _error "You are inside the ai-dev-workflow framework repo — not your target repo.
+       cd into the repo you want to govern, then run:
+         ${SCRIPT_DIR}/install.sh"
+fi
+
 _info "Repository root: ${REPO_ROOT}"
 
 # Upgrade short-circuit — skip basket selection and all scaffolding
@@ -411,17 +420,19 @@ mkdir -p "${HOME}/.claude"
 if [ ! -f "$ORG_POLICY_PATH" ]; then
     cat > "$ORG_POLICY_PATH" << ORGPOLICY
 {
-  "_comment": "Org-wide Claude Code token budget ceiling. Repos inherit this value and cannot exceed it.",
+  "_comment": "Org-wide Claude Code token budget. Daily limit = WEEKLY_LIMIT x DAILY_BUDGET_PCT / 100.",
   "_edit_policy": "Changes require a human PR — never agent-modified.",
-  "TOKEN_BUDGET": ${DEFAULT_TOKEN_BUDGET},
+  "WEEKLY_LIMIT": ${DEFAULT_WEEKLY_LIMIT},
+  "DAILY_BUDGET_PCT": ${DEFAULT_DAILY_BUDGET_PCT},
   "HARD_BLOCK_AT_100_PCT": true,
   "WARN_AT_PCT": 80
 }
 ORGPOLICY
-    _success "Org policy created: ${ORG_POLICY_PATH} (TOKEN_BUDGET=${DEFAULT_TOKEN_BUDGET})"
+    DAILY_LIMIT=$(( DEFAULT_WEEKLY_LIMIT * DEFAULT_DAILY_BUDGET_PCT / 100 ))
+    _success "Org policy created: ${ORG_POLICY_PATH} (WEEKLY_LIMIT=${DEFAULT_WEEKLY_LIMIT}, daily cap=${DAILY_LIMIT})"
 else
-    CURRENT_BUDGET=$(python3 -c "import json; d=json.load(open('${ORG_POLICY_PATH}')); print(d.get('TOKEN_BUDGET','not set'))" 2>/dev/null || echo "unreadable")
-    _info "Org policy already exists: TOKEN_BUDGET=${CURRENT_BUDGET}"
+    CURRENT_WEEKLY=$(python3 -c "import json; d=json.load(open('${ORG_POLICY_PATH}')); print(d.get('WEEKLY_LIMIT', d.get('TOKEN_BUDGET','not set')))" 2>/dev/null || echo "unreadable")
+    _info "Org policy already exists: WEEKLY_LIMIT=${CURRENT_WEEKLY}"
 fi
 
 # ── STEP 6: MCP graph server installation ────────────────────────────────────
@@ -578,7 +589,7 @@ echo "  ✓ CI workflow:    .github/workflows/gate.yml (CI parity backstop)"
 if [ "$BASKET" = "brownfield" ]; then
 echo "  ✓ Debt baseline:  .claude/baseline.json (unpopulated — init prompt fills it)"
 fi
-echo "  ✓ Org policy:     ${ORG_POLICY_PATH} (TOKEN_BUDGET=${DEFAULT_TOKEN_BUDGET})"
+echo "  ✓ Org policy:     ${ORG_POLICY_PATH} (WEEKLY_LIMIT=${DEFAULT_WEEKLY_LIMIT}, daily=$(( DEFAULT_WEEKLY_LIMIT * DEFAULT_DAILY_BUDGET_PCT / 100 )) tokens)"
 if $GRAPH_INSTALLED 2>/dev/null; then
 echo "  ✓ Graph server:   code-review-graph ${GRAPH_PACKAGE##*==} (${GRAPH_BIN_PATH})"
 echo "  ✓ MCP config:     .mcp.json (committed — team-wide graph activation)"

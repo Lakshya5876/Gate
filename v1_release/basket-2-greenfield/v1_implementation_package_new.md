@@ -17,8 +17,12 @@ gates from commit #1, zero debt ever.
 2. Create a setup branch: `git checkout -b chore/claude-init`
 3. Clone the governance framework and run the installer from within this repository's root:
    ```bash
-   git clone https://github.com/BankofLoyal/ai-dev-workflow /tmp/ai-dev-workflow
-   /tmp/ai-dev-workflow/install.sh
+   git clone https://github.com/BankofLoyal/ai-dev-workflow ~/ai-dev-workflow
+   ~/ai-dev-workflow/install.sh
+   ```
+   To remove all framework traces if you want:
+   ```bash
+   ~/ai-dev-workflow/uninstall.sh
    ```
 4. Decide three things BEFORE running the init (the prompt will ask):
    - **Stack:** language + framework (e.g. Python/FastAPI, TS/Node/Express,
