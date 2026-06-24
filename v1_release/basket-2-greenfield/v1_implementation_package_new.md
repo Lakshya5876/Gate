@@ -145,9 +145,11 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
     - Before executing any remote branch push command, compile and write a
       comprehensive state snapshot to `.claude/checkpoints/LATEST.md` capturing:
       what changed, why, and the architectural delta against baseline. gate.sh
-      enforces this as a universal structural invariant — any push containing
-      source file changes is hard-blocked unless a valid checkpoint exists.
-      This applies to all pushers with no session-type or environment exceptions.
+      enforces this at the pre-push boundary for agent sessions: it performs an
+      immutable process-tree traversal from PPID to PID 1 to confirm the push
+      originates from the Claude binary, then hard-blocks if no checkpoint exists.
+      Human pushes are never blocked — process-tree tracking isolates agent and
+      human tracks at the OS level with no heuristic bypass surface.
     - Your source of truth is the disk ledger, not the chat transcript.
 
   2.5.9 — DYNAMIC INTERROGATION & COMPULSORY BRAINSTORMING
@@ -165,9 +167,14 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
          to validate assumptions. Do not assume or guess missing
          specifications — demand clarity before a single line of code is
          written to disk.
-    gate.sh enforces this as a non-bypassable pre-commit HARD BLOCK: ≥5
-    staged files with no `.claude/checkpoints/LATEST.md` aborts the commit
-    with exit code 1 (rule applies universally — no session-type bypass).
+    gate.sh enforces this as a hard pre-commit block for agent sessions only:
+    `_is_claude_agent_process()` traverses the OS process tree recursively;
+    ≥5 staged files with no `.claude/checkpoints/LATEST.md` exits 1. Human
+    commits are unaffected — the process-tree check provides a clean separation
+    with no environment-flag or session-wrapper bypass surface. The graph index
+    lifecycle uses a kill-and-restart loop (`_ensure_graph_freshness`): any
+    active indexer is terminated via kill -9 before a fresh build for the
+    current HEAD is spawned, preventing stale-index drift across commits.
 
 You are initializing a NEW repository. The prime directive: the constitution
 you generate PRESCRIBES the ideal architecture. Every rule you write will be
