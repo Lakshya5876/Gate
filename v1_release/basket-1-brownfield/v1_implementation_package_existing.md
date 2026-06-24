@@ -58,7 +58,11 @@ agentic engineering environment — without blocking on pre-existing debt.
    `git checkout -b chore/claude-init`
 3. Confirm your test framework, linter, and type checker are installed and run
    from the repo root (e.g. `pytest`, `jest`, `ruff`, `eslint`, `mypy`, `tsc`).
-4. Ensure you have executed the installer script (`/path/to/ai-dev-workflow/install.sh`) from within this repository's root.
+4. Clone the governance framework and run the installer from within this repository's root:
+   ```bash
+   git clone https://github.com/BankofLoyal/ai-dev-workflow /tmp/ai-dev-workflow
+   /tmp/ai-dev-workflow/install.sh
+   ```
 5. **Permission-mode check:** never run the init (or any session in a governed
    repo) with `--dangerously-skip-permissions`. The generated settings pin
    `defaultMode: "default"`; that pin only protects you if you don't override it
