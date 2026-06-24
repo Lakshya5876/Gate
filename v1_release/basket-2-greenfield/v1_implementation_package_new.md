@@ -148,6 +148,25 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
       enforces this at the pre-push boundary for AI-driven push sessions.
     - Your source of truth is the disk ledger, not the chat transcript.
 
+  2.5.9 — DYNAMIC INTERROGATION & COMPULSORY BRAINSTORMING
+    Scale architectural skepticism to classified task complexity:
+    1. Tier 1 (Trivial/one-liner) or Tier 2 (simple single-file): proceed
+       directly to execution without conversational overhead.
+    2. Tier 3 (complex/multi-file) and above, or if you possess any
+       contextual doubt regarding specifications, edge cases, or upstream
+       contracts: you are STRICTLY FORBIDDEN from writing code until you
+       execute a dedicated Brainstorming Phase.
+    3. Brainstorming Phase Protocol:
+       - Explicitly lay out your architectural hypothesis.
+       - List the top 3 potential hidden regressions or failure modes.
+       - Interrogate the human developer with specific, targeted questions
+         to validate assumptions. Do not assume or guess missing
+         specifications — demand clarity before a single line of code is
+         written to disk.
+    gate.sh detects Tier 3+ footprints (≥5 staged files from an active
+    session) and warns if no checkpoint exists, reinforcing this rule at
+    the mechanical layer.
+
 You are initializing a NEW repository. The prime directive: the constitution
 you generate PRESCRIBES the ideal architecture. Every rule you write will be
 enforced by mechanical gates and SECTION 2.5 cognitive routing on every future

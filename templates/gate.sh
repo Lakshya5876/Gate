@@ -367,6 +367,19 @@ except Exception:
     fi
 fi
 
+# ── STEP 4.4: TIER 3+ BRAINSTORMING ADVISORY ─────────────────────────────────
+# If an active Claude session is staging a large file footprint with no checkpoint,
+# the session may have skipped the 2.5.9 brainstorming phase. Warns — cannot hard-
+# block here because brainstorming must happen BEFORE file writes; gate.sh runs
+# after. The pre-push checkpoint gate (STEP 4.6) is the hard enforcement boundary.
+if [ "$GATE_TRIGGER" = "pre-commit" ] && [ "${SESSION_SPEND_VAL:-0}" -gt 0 ] 2>/dev/null; then
+    _T3_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2>/dev/null || echo "0")
+    _T3_CKPT=".claude/checkpoints/LATEST.md"
+    if [ "${_T3_COUNT:-0}" -ge 5 ] && [ ! -f "$_T3_CKPT" ]; then
+        echo -e "${YELLOW}⚠ GATE: ${_T3_COUNT} files in change footprint — Tier 3+ complexity. If no brainstorming phase was executed for this task (rule 2.5.9), write a checkpoint to .claude/checkpoints/LATEST.md before pushing.${RESET}" >&2
+    fi
+fi
+
 # ── STEP 4.5: FINGERPRINT FORMS (spec §4.2 — never conflate) ─────────────────
 # WORKING_TREE_FP: working-tree state, keys the in-session ledger skip ONLY.
 # COMMIT_TREE_FP : the tree actually being committed/pushed, keys receipts.
