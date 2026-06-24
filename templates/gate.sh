@@ -160,7 +160,7 @@ _ensure_graph_freshness() {
     # a fresh build is spawned, eliminating stale-index drift across commits.
     [ -f ".mcp.json" ] || return 0
     command -v code-review-graph >/dev/null 2>&1 || return 0
-    _GF_HIT=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|py|go|java)$' | head -1)
+    _GF_HIT=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|py|go|java)$' | head -1 || true)
     [ -n "$_GF_HIT" ] || return 0
     _GF_PID_FILE=".claude/graph.pid"
     if [ -f "$_GF_PID_FILE" ]; then
@@ -453,7 +453,7 @@ if [ "$GATE_TRIGGER" = "pre-push" ]; then
     _is_claude_agent_process
     if [ "$IS_AGENT" = "true" ]; then
         _CKPT=".claude/checkpoints/LATEST.md"
-        _PP_SRC=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|py|go|java|rb|rs|c|cpp|h|cs|swift|kt)$' | head -1)
+        _PP_SRC=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|py|go|java|rb|rs|c|cpp|h|cs|swift|kt)$' | head -1 || true)
         if [ -n "$_PP_SRC" ]; then
             if [ ! -f "$_CKPT" ]; then
                 echo -e "${RED}PUSH GATING FAILURE: Agent push modifies source files without a checkpoint. Write a summary to .claude/checkpoints/LATEST.md before crossing the remote push boundary.${RESET}" >&2
