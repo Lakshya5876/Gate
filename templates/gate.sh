@@ -154,6 +154,18 @@ except Exception:
 " 2>/dev/null || echo "no"
 }
 
+_ensure_graph_freshness() {
+    # Non-blocking: when the change set touches structural source files and the
+    # graph toolchain is installed, kick off a background index rebuild so the
+    # agent navigates a current graph on its next invocation.
+    [ -f ".mcp.json" ] || return 0
+    command -v code-review-graph >/dev/null 2>&1 || return 0
+    _GF_HIT=$(echo "$CHANGED_FILES" | grep -E '\.(ts|tsx|py|go|java)$' | head -1)
+    [ -n "$_GF_HIT" ] || return 0
+    nohup code-review-graph build > /dev/null 2>&1 &
+    echo -e "${GREEN}GATE: graph index refreshing in background.${RESET}" >&2
+}
+
 _run_with_timeout() {
     local timeout_sec cmd_label
     timeout_sec=$(_json_get "$GATE_STATE" "thresholds.command_timeout_sec")
@@ -837,6 +849,8 @@ if [ -n "$COMMIT_TREE_FP" ]; then
     _receipt_write "$COMMIT_TREE_FP" "$CURRENT_BRANCH"
     echo -e "${GREEN}GATE: receipt written for tree ${COMMIT_TREE_FP:0:12}.${RESET}" >&2
 fi
+
+_ensure_graph_freshness
 
 _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "pass"
 

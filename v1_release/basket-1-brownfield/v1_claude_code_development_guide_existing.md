@@ -827,6 +827,7 @@ These rules apply at all times, regardless of graph availability:
 - **`semantic_search_nodes_tool` replaces all broad grep** when graph is active.
 - **When graph is inactive:** use `grep -n` or `rg` for symbol lookups — never directory-wide `cat`.
 - **Flush on completion:** final output line of every task: `Task complete. Run /clear to flush session context.`
+- **AUTOMATED MAP REFRESH:** To eliminate graph entropy and prevent the agent from navigating the repository using stale metadata, the framework implements a background regeneration loop. Every time a change set modifies structural source files, the local git hook asynchronously refreshes the underlying SQLite index. This guarantees that the agent's spatial understanding of the codebase remains synchronized with reality over long-running execution periods.
 
 ---
 
