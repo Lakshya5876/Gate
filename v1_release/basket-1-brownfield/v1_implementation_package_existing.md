@@ -192,6 +192,15 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
     - gate.sh mechanically detects CLAUDE.md hash drift and warns when the
       constitution has changed since the last verified pass — heed that warning
       by re-reading the file before proceeding.
+    - At the start of every session, if `.claude/checkpoints/LATEST.md` exists,
+      read it and run `git rev-parse HEAD`. SHA matches checkpoint → execute
+      RESUME INSTRUCTION and announce "Resuming from checkpoint <timestamp>:
+      <task>". SHA diverged → state divergence and ask. Clearly new task →
+      ignore; the old checkpoint will be superseded at next write.
+    - After every successful `git commit`, immediately write LATEST.md using the
+      full checkpoint schema. Not optional — this is the mechanism that makes
+      /clear safe across sessions. A fresh session reads LATEST.md and continues
+      without loss. Write LATEST.md before any push attempt.
     - Before executing any remote branch push command, compile and write a
       comprehensive state snapshot to `.claude/checkpoints/LATEST.md` capturing:
       what changed, why, and the architectural delta against baseline. gate.sh
@@ -200,6 +209,13 @@ SECTION 2.5 — COGNITIVE ROUTING & EXECUTION GATES (Always Active)
       originates from the Claude binary, then hard-blocks if no checkpoint exists.
       Human pushes are never blocked — process-tree tracking isolates agent and
       human tracks at the OS level with no heuristic bypass surface.
+    - Monitor for context degradation signals: re-reading files already read this
+      session (SD1), reproducing a fixed mistake (SD2), narrating prior steps
+      unprompted (SD3), hedging on previously unambiguous facts (SD4), or 5+
+      phases / 8+ files / session > 3 hours since last /clear (SD5). When 2+
+      signals fire simultaneously: stop, write LATEST.md, output the forced
+      handoff message ("CONTEXT SATURATION DETECTED..."), and wait for /clear
+      before writing further code.
     - Your source of truth is the disk ledger, not the chat transcript.
 
   2.5.9 — DYNAMIC INTERROGATION & COMPULSORY BRAINSTORMING

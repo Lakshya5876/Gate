@@ -1168,6 +1168,51 @@ At the start of ANY session in a repo where `.claude/checkpoints/LATEST.md` exis
 Keep the 10 most recent checkpoint files; delete older ones at write time.
 LATEST.md always reflects the newest.
 
+### 4.1.7 Post-Commit Checkpoint Update (mandatory)
+
+After EVERY successful `git commit`, immediately write LATEST.md using the full
+schema from §4.1.4. Not optional — not even on trivial commits. This is the
+mechanism that makes `/clear` safe across sessions: a fresh session reads
+LATEST.md, executes the RESUME INSTRUCTION, and continues without loss. Write
+LATEST.md before any push attempt.
+
+### 4.1.8 Context Degradation Detection and Forced Handoff
+
+Beyond the trigger rules C1–C5 (§4.1.3), monitor continuously for these
+signals during a session:
+
+| Signal | Indicator |
+|--------|-----------|
+| SD1 | Re-reading a file already fully read this session (no new change justifies it) |
+| SD2 | Reproducing an error diagnosed and fixed earlier in this session |
+| SD3 | Narrating prior steps unprompted — model compensating for lost thread |
+| SD4 | Hedging on a decision or file content that was unambiguous earlier in the session |
+| SD5 | 5+ phases completed, 8+ files modified, or session > 3 hours since last /clear |
+
+**Forced Handoff Protocol** — when 2+ signals (SD1–SD5) are simultaneously active:
+
+1. Stop current work immediately.
+2. Write `.claude/checkpoints/LATEST.md` (full schema, §4.1.4). RESUME
+   INSTRUCTION must be written as a briefing for a cold-start agent with zero
+   prior context — not a summary for the current session.
+3. Output exactly this message (no paraphrasing, no abbreviation):
+
+```
+CONTEXT SATURATION DETECTED. Code quality will degrade if this session
+continues. To preserve output quality:
+
+  1. Type /clear to flush the session.
+  2. The new session will read LATEST.md and resume from exactly where
+     we stopped — no context is lost.
+
+LATEST.md written: .claude/checkpoints/LATEST.md
+Resume instruction: <RESUME INSTRUCTION verbatim>
+```
+
+4. Write no further code until the user runs /clear and opens a new session.
+   If the user overrides and asks to continue anyway, state the risk once,
+   then comply.
+
 ## 4.2 The Gate-State Ledger
 
 ### 4.2.1 The problem it solves
