@@ -69,6 +69,14 @@ set -euo pipefail
 # interactive `read </dev/tty` either hangs the editor or fails on a missing
 # controlling terminal — so we must fall through gracefully, never block.
 _is_extension_or_non_tty() {
+    # Hardware-level TTY test takes absolute precedence over all passive env-var
+    # checks. Inherited vars like VSCODE_PID or CURSOR_TRACE_ID can be present
+    # in a genuine interactive terminal (e.g. opened from VS Code's file manager
+    # or launched via an alias in a sourced shell profile). Two real file
+    # descriptors attached to a terminal is conclusive — no passive check overrides it.
+    [ -t 0 ] && [ -t 1 ] && return 1
+
+    # Passive checks only reached when at least one FD is not a real terminal.
     # Each condition is independent — explicit returns avoid &&/|| precedence traps.
     [ ! -t 0 ]                              && return 0   # stdin not a terminal
     [ ! -r /dev/tty ]                       && return 0   # no controlling terminal
