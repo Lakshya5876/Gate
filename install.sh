@@ -1,0 +1,615 @@
+#!/usr/bin/env bash
+# install.sh — Claude Code governance framework installer
+# Usage: ./install.sh  (must be run from within the cloned repository)
+#
+# What this does:
+#   1. Detects basket (greenfield vs brownfield) and validates preconditions
+#   2. Downloads and copies governance files into the target repo
+#   3. Installs git hooks and configures core.hooksPath
+#   4. Installs code-review-graph MCP server (pipx — zero user knowledge required)
+#   5. Builds the initial multi-domain graph
+#   6. Writes .mcp.json (project-scoped, committed — not global settings)
+#   7. Scaffolds org-level token policy if absent
+#   8. Prints the one remaining human step (paste the init prompt)
+#
+# NOTE ON graphify: safishamsi/graphify was evaluated and rejected — unnaturally
+# high star count (68k, likely botted) indicates unverified provenance. Multi-domain
+# graph coverage (SQL, infra, CI) is achieved here via code-review-graph extended
+# file patterns instead.
+
+set -euo pipefail
+
+# ── Constants ──────────────────────────────────────────────────────────────────
+FRAMEWORK_VERSION="v1"
+FRAMEWORK_SEMVER="1.0.0"
+GRAPH_PACKAGE="code-review-graph==2.3.6"
+ORG_POLICY_PATH="${HOME}/.claude/org_policy.json"
+DEFAULT_WEEKLY_LIMIT=1000000
+DEFAULT_DAILY_BUDGET_PCT=20
+
+RED='\033[0;31m'; YELLOW='\033[1;33m'; GREEN='\033[0;32m'; BLUE='\033[0;34m'; RESET='\033[0m'
+
+# ── Helpers (defined before first use) ────────────────────────────────────────
+_info()    { echo -e "${BLUE}[install]${RESET} $*"; }
+_success() { echo -e "${GREEN}[install]${RESET} ✓ $*"; }
+_warn()    { echo -e "${YELLOW}[install]${RESET} ⚠ $*"; }
+_error()   { echo -e "${RED}[install]${RESET} ✗ $*" >&2; exit 1; }
+
+_require() {
+    command -v "$1" >/dev/null 2>&1 || _error "$1 is required but not installed. $2"
+}
+
+_fetch() {
+    # Copy a file from the local REPO_DIR to $2
+    local src="$1" dst="$2"
+    local src_path="${REPO_DIR}/${src}"
+
+    if [ ! -f "$src_path" ]; then
+        _error "File not found: ${src_path}"
+    fi
+
+    cp "$src_path" "$dst" || _error "Failed to copy ${src} to ${dst}"
+}
+
+_write_hooks() {
+    # Write gate.sh, pre-commit, and pre-push into .githooks/ and configure git.
+    # Called from the fresh-install flow (STEP 4) and from _upgrade().
+    mkdir -p .githooks
+
+    _fetch "templates/gate.sh" ".githooks/gate.sh"
+    chmod +x .githooks/gate.sh
+
+    cat > .githooks/pre-commit << 'PRECOMMIT'
+#!/usr/bin/env bash
+# pre-commit — delegates to gate.sh
+# SKIP_GATE=1 is a TTY-guarded bypass with git-note audit trail.
+set -euo pipefail
+
+# Detect an IDE-extension / non-interactive wrapper. In these environments an
+# interactive `read </dev/tty` either hangs the editor or fails on a missing
+# controlling terminal — so we must fall through gracefully, never block.
+_is_extension_or_non_tty() {
+    # Hardware-level TTY test takes absolute precedence over all passive env-var
+    # checks. Inherited vars like VSCODE_PID or CURSOR_TRACE_ID can be present
+    # in a genuine interactive terminal (e.g. opened from VS Code's file manager
+    # or launched via an alias in a sourced shell profile). Two real file
+    # descriptors attached to a terminal is conclusive — no passive check overrides it.
+    [ -t 0 ] && [ -t 1 ] && return 1
+
+    # Passive checks only reached when at least one FD is not a real terminal.
+    # Each condition is independent — explicit returns avoid &&/|| precedence traps.
+    [ ! -t 0 ]                              && return 0   # stdin not a terminal
+    [ ! -r /dev/tty ]                       && return 0   # no controlling terminal
+    [ "${TERM_PROGRAM:-}" = "vscode" ]      && return 0   # VS Code integrated terminal
+    [ -n "${VSCODE_PID:-}" ]                && return 0
+    [ -n "${VSCODE_GIT_IPC_HANDLE:-}" ]     && return 0
+    [ -n "${CURSOR_TRACE_ID:-}" ]           && return 0   # Cursor
+    case "${__CFBundleIdentifier:-}" in *vscode*|*cursor*) return 0 ;; esac
+    return 1
+}
+
+if [ "${SKIP_GATE:-0}" = "1" ]; then
+    # The bypass requires a typed reason at an interactive terminal. If we cannot
+    # safely prompt (extension/non-TTY), refuse with explicit instructions rather
+    # than hang the editor or emit control codes into the output pane.
+    if _is_extension_or_non_tty; then
+        echo "==============================================================" >&2
+        echo "[CRASH GUARD] SKIP_GATE bypass needs an interactive terminal." >&2
+        echo "An IDE-extension / non-TTY environment was detected, so the" >&2
+        echo "audited bypass prompt cannot run here (it would freeze the UI)." >&2
+        echo "" >&2
+        echo "To bypass the gate, run the commit from a real terminal:" >&2
+        echo "    SKIP_GATE=1 git commit -m \"your message\"" >&2
+        echo "and type the required bypass reason when prompted." >&2
+        echo "Otherwise, fix the gate findings and commit normally." >&2
+        echo "==============================================================" >&2
+        exit 1
+    fi
+    read -r -p "Bypass reason (required): " BYPASS_REASON </dev/tty
+    if [ -z "$BYPASS_REASON" ]; then
+        echo "Bypass reason is required. Aborting." >&2
+        exit 1
+    fi
+    COMMITTER_DATE=$(date +%s)
+    git notes --ref=refs/notes/bypasses append HEAD -m "BYPASS | date=${COMMITTER_DATE} | reason=${BYPASS_REASON}" 2>/dev/null || true
+    echo "Gate bypassed. Reason logged to refs/notes/bypasses." >&2
+    exit 0
+fi
+
+GATE_TRIGGER=pre-commit exec "$(git rev-parse --git-dir)"/../.githooks/gate.sh
+PRECOMMIT
+    chmod +x .githooks/pre-commit
+
+    cat > .githooks/pre-push << 'PREPUSH'
+#!/usr/bin/env bash
+# pre-push — protected branch guard + fingerprint receipt check (via gate.sh)
+set -euo pipefail
+
+# Protected branches: exact names + release/* prefix. Matches gate.sh / spec §2.5.4.
+PROTECTED_EXACT="main master develop production"
+# Color only on a real terminal — IDE-extension wrappers (non-TTY) would otherwise
+# render raw ANSI escapes as garbage and can freeze the editor output pane.
+if [ -t 2 ]; then
+    RED='\033[0;31m'; YELLOW='\033[1;33m'; RESET='\033[0m'
+else
+    RED=''; YELLOW=''; RESET=''
+fi
+
+while IFS=' ' read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
+    REMOTE_BRANCH="${REMOTE_REF##refs/heads/}"
+
+    # Block force pushes (refspec starts with +)
+    if [[ "$LOCAL_REF" == +* ]]; then
+        echo -e "${RED}PRE-PUSH BLOCK: Force push is forbidden.${RESET}" >&2
+        exit 1
+    fi
+
+    # Block any refspec that deletes the bypass audit trail
+    if echo "$LOCAL_REF $REMOTE_REF" | grep -qE ':refs/notes/bypasses'; then
+        echo -e "${RED}PRE-PUSH BLOCK: Tampering with the bypass audit trail is forbidden.${RESET}" >&2
+        exit 1
+    fi
+
+    # Block direct pushes to protected branches (exact + release/* prefix)
+    for protected in $PROTECTED_EXACT; do
+        if [ "$REMOTE_BRANCH" = "$protected" ]; then
+            echo -e "${RED}PRE-PUSH BLOCK: Direct push to protected branch '${protected}' is forbidden. Open a PR.${RESET}" >&2
+            exit 1
+        fi
+    done
+    if [[ "$REMOTE_BRANCH" == release/* ]]; then
+        echo -e "${RED}PRE-PUSH BLOCK: Direct push to protected branch '${REMOTE_BRANCH}' is forbidden. Open a PR.${RESET}" >&2
+        exit 1
+    fi
+
+    # Bypass clock enforcement (24h policy):
+    #   active bypass (< 24h)  → WARN and allow push (audit trail still intact)
+    #   expired bypass (≥ 24h) → BLOCK push until the issue is fixed or a new bypass is opened
+    if git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -q "BYPASS"; then
+        BYPASS_DATE=$(git notes --ref=refs/notes/bypasses show HEAD 2>/dev/null | grep -oE 'date=[0-9]+' | head -1 | cut -d= -f2)
+        NOW_EPOCH=$(date +%s)
+        if [ -n "$BYPASS_DATE" ]; then
+            BYPASS_AGE=$(( NOW_EPOCH - BYPASS_DATE ))
+            if [ "$BYPASS_AGE" -gt 86400 ]; then
+                echo -e "${RED}PRE-PUSH BLOCK: Bypass deadline expired.${RESET}" >&2
+                echo "A gate bypass was recorded $((BYPASS_AGE / 3600))h ago — the 24-hour resolution window has closed." >&2
+                echo "Fix the underlying issue and commit normally, OR open a new bypass window:" >&2
+                echo "    SKIP_GATE=1 git commit --allow-empty -m 'chore: extend bypass window — <reason>'" >&2
+                exit 1
+            else
+                REMAINING=$(( (86400 - BYPASS_AGE) / 3600 ))
+                echo -e "${YELLOW}⚠ Active bypass — pushing with audit note intact. Resolution deadline: ${REMAINING}h remaining.${RESET}" >&2
+            fi
+        fi
+    fi
+done
+
+# Run gate.sh for push-time checks (fingerprint receipt verification + mechanical tests)
+GATE_TRIGGER=pre-push exec "$(git rev-parse --git-dir)"/../.githooks/gate.sh
+PREPUSH
+    chmod +x .githooks/pre-push
+
+    git config core.hooksPath .githooks
+}
+
+_upgrade() {
+    cd "$REPO_ROOT"
+
+    [ -f ".claude/gate_state.json" ] || _error "--upgrade requires an existing governed repo (.claude/gate_state.json not found)."
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo " Claude Code Governance Framework — Upgrade to ${FRAMEWORK_SEMVER}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    _info "Re-copying gate.sh and hooks..."
+    _write_hooks
+    _success "Hooks updated."
+
+    # CI workflow is force-overwritten on upgrade (unlike fresh install which skips if exists)
+    mkdir -p .github/workflows
+    _fetch "templates/ci-gate.yml" ".github/workflows/gate.yml"
+    _success "CI gate workflow updated (.github/workflows/gate.yml)"
+
+    # Bump version in gate_state.json, preserve all user-owned fields
+    python3 - << PYEOF
+import json
+from datetime import datetime, timezone
+with open('.claude/gate_state.json') as f:
+    d = json.load(f)
+d['framework_version'] = '${FRAMEWORK_SEMVER}'
+d['framework_last_upgrade'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+with open('.claude/gate_state.json', 'w') as f:
+    json.dump(d, f, indent=2)
+PYEOF
+    _success "gate_state.json: framework_version → ${FRAMEWORK_SEMVER}"
+
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo -e "${GREEN} Upgrade complete${RESET}"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    echo "What was updated:"
+    echo "  ✓ .githooks/gate.sh"
+    echo "  ✓ .githooks/pre-commit"
+    echo "  ✓ .githooks/pre-push"
+    echo "  ✓ .github/workflows/gate.yml"
+    echo "  ✓ .claude/gate_state.json: framework_version → ${FRAMEWORK_SEMVER}"
+    echo ""
+    echo "What was preserved:"
+    echo "  • .claude/baseline.json (debt ratchet — untouched)"
+    echo "  • CLAUDE.md (repo constitution — untouched)"
+    echo "  • .mcp.json (graph config — untouched)"
+    echo "  • gate_state.json: receipts, token data, thresholds, core_files"
+    echo ""
+    echo "Commit the upgrade to activate it for the whole team:"
+    echo "  git add .githooks/ .github/workflows/gate.yml .claude/gate_state.json"
+    echo "  git commit -m 'chore: upgrade governance framework to ${FRAMEWORK_SEMVER}'"
+    echo ""
+}
+
+# Locate the ai-dev-workflow framework directory (helpers exist now, so _error works)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ ! -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_package_existing.md" ]; then
+    _error "Framework files not found. Ensure you cloned ai-dev-workflow. Usage: cd <your-target-repo> && /path/to/ai-dev-workflow/install.sh"
+fi
+REPO_DIR="${SCRIPT_DIR}"
+
+# ── Argument parsing ──────────────────────────────────────────────────────────
+UPGRADE_MODE=false
+for _arg in "$@"; do
+    case "$_arg" in
+        --upgrade) UPGRADE_MODE=true ;;
+        *) _error "Unknown argument: ${_arg}. Usage: ./install.sh [--upgrade]" ;;
+    esac
+done
+
+# ── STEP 0: Preflight checks ──────────────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " Claude Code Governance Framework — ${FRAMEWORK_VERSION} Installer"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+
+_require git "Install git from https://git-scm.com/"
+_require python3 "Install Python 3.8+ from https://python.org/"
+
+# Must be inside a git repo
+git rev-parse --git-dir >/dev/null 2>&1 || _error "Not inside a git repository. Run 'git init' first."
+
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+# Guard: refuse to govern the ai-dev-workflow repo itself
+if [ "$REPO_ROOT" = "$SCRIPT_DIR" ]; then
+    _error "You are inside the ai-dev-workflow framework repo — not your target repo.
+       cd into the repo you want to govern, then run:
+         ${SCRIPT_DIR}/install.sh"
+fi
+
+_info "Repository root: ${REPO_ROOT}"
+
+# Upgrade short-circuit — skip basket selection and all scaffolding
+if $UPGRADE_MODE; then _upgrade; exit 0; fi
+
+# Claude Code CLI check — advisory only, not a hard block
+if ! command -v claude >/dev/null 2>&1; then
+    _warn "Claude Code CLI not found. Install from https://claude.ai/download — required for the final init step."
+fi
+
+# ── STEP 1: Basket selection ──────────────────────────────────────────────────
+echo ""
+echo "Which type of repository is this?"
+echo "  [g] Greenfield — new project, no prior history"
+echo "  [b] Brownfield — existing repository with code"
+echo ""
+read -r -p "Enter g or b: " BASKET_INPUT </dev/tty
+
+case "$BASKET_INPUT" in
+    g|G|green|greenfield) BASKET="greenfield" ;;
+    b|B|brown|brownfield) BASKET="brownfield" ;;
+    *) _error "Invalid input '${BASKET_INPUT}'. Enter 'g' or 'b'." ;;
+esac
+_info "Basket: ${BASKET}"
+
+# LOC advisory for brownfield
+if [ "$BASKET" = "brownfield" ]; then
+    echo ""
+    _info "Checking repository size..."
+    LOC=$(find . -not -path './.git/*' -type f | xargs wc -l 2>/dev/null | tail -1 | awk '{print $1}' || echo "0")
+    _info "Approximate LOC: ${LOC}"
+    if [ "${LOC:-0}" -gt 1000000 ]; then
+        _error "Repository exceeds 1,000,000 LOC (${LOC} lines). V1 framework is certified for ≤1M LOC only."
+    fi
+fi
+
+# ── STEP 2: Copy governance files ────────────────────────────────────────────
+echo ""
+_info "Copying governance files..."
+
+cd "$REPO_ROOT"
+
+# Dev guide (copied as-is with v1_ prefix — init prompt reads it, generates CLAUDE.md from it)
+if [ "$BASKET" = "greenfield" ]; then
+    DEV_GUIDE_SRC="v1_release/basket-2-greenfield/v1_claude_code_development_guide_new.md"
+    DEV_GUIDE_DST="v1_claude_code_development_guide_new.md"
+    INIT_PKG_SRC="v1_release/basket-2-greenfield/v1_implementation_package_new.md"
+    INIT_PKG_DST="v1_implementation_package_new.md"
+else
+    DEV_GUIDE_SRC="v1_release/basket-1-brownfield/v1_claude_code_development_guide_existing.md"
+    DEV_GUIDE_DST="v1_claude_code_development_guide_existing.md"
+    INIT_PKG_SRC="v1_release/basket-1-brownfield/v1_implementation_package_existing.md"
+    INIT_PKG_DST="v1_implementation_package_existing.md"
+fi
+
+_fetch "$DEV_GUIDE_SRC" "$DEV_GUIDE_DST"
+_fetch "$INIT_PKG_SRC" "$INIT_PKG_DST"
+_success "Dev guide copied: ${DEV_GUIDE_DST}"
+_success "Init package copied: ${INIT_PKG_DST}"
+
+# ── STEP 3: Scaffold .claude/ directory ───────────────────────────────────────
+_info "Scaffolding .claude/ directory..."
+mkdir -p .claude/commands .claude/checkpoints
+
+# gate_state.json from template
+_fetch "templates/gate_state.json" ".claude/gate_state.json"
+# Stamp today's date into token.token_last_reset
+python3 -c "
+import json
+from datetime import date
+with open('.claude/gate_state.json') as f:
+    d = json.load(f)
+d.setdefault('token', {})['token_last_reset'] = str(date.today())
+d['framework_version'] = '${FRAMEWORK_SEMVER}'
+with open('.claude/gate_state.json', 'w') as f:
+    json.dump(d, f, indent=2)
+"
+_success "gate_state.json created"
+
+
+# session_state.json (gitignored — ephemeral)
+echo '{"mode": null, "complexity_tier": null, "budget_pct_at_selection": null, "timestamp": null}' > .claude/session_state.json
+_success "session_state.json created (gitignored)"
+
+# baseline.json — brownfield only. Seeded UNPOPULATED here; the init prompt
+# (Phase C/D) fills lint_findings once LINT_CMD is known, then sets populated=true.
+# gate.sh treats an unpopulated baseline as zero-tolerance until it is filled.
+if [ "$BASKET" = "brownfield" ] && [ ! -f ".claude/baseline.json" ]; then
+    HEAD_SHA_NOW=$(git rev-parse HEAD 2>/dev/null || echo "INIT")
+    cat > .claude/baseline.json << BASELINE
+{
+  "_comment": "Identity-based debt baseline. gate.sh grandfathers these findings and blocks any NEW identity. Identity = '<normalized_path>|<rule_code>'. Committed team state — edited only via human-authored PR.",
+  "ratchet_mode": "identity",
+  "populated": false,
+  "generated_at": null,
+  "generated_from_sha": "${HEAD_SHA_NOW}",
+  "lint_findings": [],
+  "summary": { "lint_count": 0 }
+}
+BASELINE
+    _success "baseline.json seeded (unpopulated — init prompt fills it)"
+fi
+
+# ── STEP 4: Install git hooks ──────────────────────────────────────────────────
+_info "Installing git hooks..."
+_write_hooks
+_success "Git hooks installed (.githooks/)"
+
+# CI parity workflow — the authoritative backstop if local hooks are stripped.
+mkdir -p .github/workflows
+if [ ! -f ".github/workflows/gate.yml" ]; then
+    _fetch "templates/ci-gate.yml" ".github/workflows/gate.yml"
+    _success "CI gate workflow installed (.github/workflows/gate.yml)"
+else
+    _warn ".github/workflows/gate.yml already exists — left unchanged. Compare against templates/ci-gate.yml manually."
+fi
+
+# Bypass note refspecs (so bypass audit trail leaves the machine)
+git config --add remote.origin.push  'refs/notes/bypasses:refs/notes/bypasses' 2>/dev/null || true
+git config --add remote.origin.fetch '+refs/notes/bypasses:refs/notes/bypasses' 2>/dev/null || true
+_success "Bypass note refspecs configured"
+
+# ── STEP 5: Org-level token policy ───────────────────────────────────────────
+_info "Checking org-level token policy..."
+mkdir -p "${HOME}/.claude"
+
+if [ ! -f "$ORG_POLICY_PATH" ]; then
+    cat > "$ORG_POLICY_PATH" << ORGPOLICY
+{
+  "_comment": "Org-wide Claude Code token budget. Daily limit = WEEKLY_LIMIT x DAILY_BUDGET_PCT / 100.",
+  "_edit_policy": "Changes require a human PR — never agent-modified.",
+  "WEEKLY_LIMIT": ${DEFAULT_WEEKLY_LIMIT},
+  "DAILY_BUDGET_PCT": ${DEFAULT_DAILY_BUDGET_PCT},
+  "HARD_BLOCK_AT_100_PCT": true,
+  "WARN_AT_PCT": 80
+}
+ORGPOLICY
+    DAILY_LIMIT=$(( DEFAULT_WEEKLY_LIMIT * DEFAULT_DAILY_BUDGET_PCT / 100 ))
+    _success "Org policy created: ${ORG_POLICY_PATH} (WEEKLY_LIMIT=${DEFAULT_WEEKLY_LIMIT}, daily cap=${DAILY_LIMIT})"
+else
+    CURRENT_WEEKLY=$(python3 -c "import json; d=json.load(open('${ORG_POLICY_PATH}')); print(d.get('WEEKLY_LIMIT', d.get('TOKEN_BUDGET','not set')))" 2>/dev/null || echo "unreadable")
+    _info "Org policy already exists: WEEKLY_LIMIT=${CURRENT_WEEKLY}"
+fi
+
+# ── STEP 6: MCP graph server installation ────────────────────────────────────
+echo ""
+_info "Installing code-review-graph MCP server (zero-knowledge — this is automatic)..."
+
+# Ensure pipx is available
+if ! command -v pipx >/dev/null 2>&1; then
+    _info "pipx not found — installing..."
+    if command -v pip3 >/dev/null 2>&1; then
+        pip3 install --user pipx --quiet || _error "Failed to install pipx. Install manually: pip3 install --user pipx"
+        # Add pipx bin to PATH for this session
+        export PATH="${HOME}/.local/bin:${PATH}"
+    else
+        _error "pip3 not found. Install Python 3 with pip: https://python.org/"
+    fi
+fi
+
+# Install the graph package (pinned exact version — security requirement)
+_info "Installing ${GRAPH_PACKAGE}..."
+pipx install "${GRAPH_PACKAGE}" --force --quiet 2>&1 | tail -3 || {
+    _warn "code-review-graph install failed. Graph mode will be inactive. Continuing..."
+    GRAPH_INSTALLED=false
+}
+GRAPH_INSTALLED="${GRAPH_INSTALLED:-true}"
+
+if $GRAPH_INSTALLED; then
+    # Detect bin path
+    GRAPH_BIN=$(pipx environment --value PIPX_BIN_DIR 2>/dev/null || echo "${HOME}/.local/bin")
+    GRAPH_BIN_PATH="${GRAPH_BIN}/code-review-graph"
+
+    if [ ! -f "$GRAPH_BIN_PATH" ]; then
+        _warn "code-review-graph binary not found at ${GRAPH_BIN_PATH}. Trying PATH..."
+        GRAPH_BIN_PATH=$(command -v code-review-graph 2>/dev/null || echo "")
+    fi
+
+    if [ -n "$GRAPH_BIN_PATH" ] && [ -f "$GRAPH_BIN_PATH" ]; then
+        _success "code-review-graph installed: ${GRAPH_BIN_PATH}"
+
+        # Build the initial graph with multi-domain config
+        _info "Building initial code graph (multi-domain: code + SQL + infra + CI)..."
+        _info "This may take 2–5 minutes on large repositories (>100k LOC). Progress updates below."
+        cd "$REPO_ROOT"
+
+        # Background the build with a progress monitor (10-minute timeout for 1M LOC repos)
+        if command -v timeout >/dev/null 2>&1; then
+            if timeout 600 "${GRAPH_BIN_PATH}" build \
+                --include "*.py,*.ts,*.tsx,*.js,*.go,*.rs,*.java" \
+                --include "*.sql,migrations/**" \
+                --include "Dockerfile*,docker-compose*.yml,*.tf,*.hcl" \
+                --include ".github/workflows/*.yml,.circleci/config.yml" \
+                --include "nginx.conf,*.conf,.env.example" \
+                --exclude ".git/,node_modules/,.venv/,dist/,build/,__pycache__/" \
+                2>&1 | while IFS= read -r line; do
+                    # Emit progress every 5 lines of output
+                    _info "Graph: $line"
+                done; then
+                :  # Build succeeded
+            else
+                EXIT_CODE=$?
+                if [ $EXIT_CODE -eq 124 ]; then
+                    _warn "Graph build exceeded 10-minute timeout. This repository may exceed 1M LOC. Continuing without graph."
+                else
+                    _warn "Graph build failed (exit $EXIT_CODE). Graph mode inactive until resolved."
+                fi
+            fi
+        else
+            # Fallback for systems without timeout command
+            "${GRAPH_BIN_PATH}" build \
+                --include "*.py,*.ts,*.tsx,*.js,*.go,*.rs,*.java" \
+                --include "*.sql,migrations/**" \
+                --include "Dockerfile*,docker-compose*.yml,*.tf,*.hcl" \
+                --include ".github/workflows/*.yml,.circleci/config.yml" \
+                --include "nginx.conf,*.conf,.env.example" \
+                --exclude ".git/,node_modules/,.venv/,dist/,build/,__pycache__/" \
+                2>&1 | tail -10 || _warn "Graph build failed — graph mode inactive until resolved."
+        fi
+
+        # Write .mcp.json — project-scoped, committed (NOT ~/.claude/settings.json)
+        # Rationale: .mcp.json travels with the repo so every team member gets graph
+        # mode automatically on clone, without per-developer setup.
+        cat > .mcp.json << MCPJSON
+{
+  "_comment": "Project-scoped MCP server config — committed so all team members get graph mode on clone.",
+  "_do_not_move_to_settings": "This file must remain in the project root, not in ~/.claude/settings.json.",
+  "mcpServers": {
+    "code-review-graph": {
+      "command": "${GRAPH_BIN_PATH}",
+      "args": ["serve"],
+      "env": {
+        "PROJECT_ROOT": "."
+      }
+    }
+  }
+}
+MCPJSON
+        _success ".mcp.json written (project root, committed)"
+
+        # Verify graph is live
+        _info "Verifying graph server..."
+        GRAPH_STATUS=$("${GRAPH_BIN_PATH}" status 2>&1 || echo "unavailable")
+        if echo "$GRAPH_STATUS" | grep -qi "healthy\|running\|ok\|nodes"; then
+            _success "Graph server healthy: ${GRAPH_STATUS}"
+            # Update gate_state.json with graph metadata
+            python3 -c "
+import json, re
+from datetime import datetime, timezone
+with open('.claude/gate_state.json') as f:
+    d = json.load(f)
+node_match = re.search(r'(\d+)\s*nodes?', '${GRAPH_STATUS}', re.IGNORECASE)
+d.setdefault('mcp_graph', {})['last_build_timestamp'] = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%M:%SZ')
+d['mcp_graph']['node_count'] = int(node_match.group(1)) if node_match else 0
+with open('.claude/gate_state.json', 'w') as f:
+    json.dump(d, f, indent=2)
+" 2>/dev/null || true
+        else
+            _warn "Graph server not responding. Graph mode inactive until 'code-review-graph build' is run."
+        fi
+    else
+        _warn "Could not locate code-review-graph binary. Graph mode inactive."
+    fi
+fi
+
+# ── STEP 7: .gitignore additions ─────────────────────────────────────────────
+_info "Updating .gitignore..."
+GITIGNORE_ENTRIES=(
+    ".claude/session_state.json"
+    ".claude/session_spend.tmp"
+    ".claude/git_cache.json"
+    ".claude/checkpoints/"
+    ".env"
+    ".env.*"
+)
+for entry in "${GITIGNORE_ENTRIES[@]}"; do
+    if ! grep -qF "$entry" .gitignore 2>/dev/null; then
+        echo "$entry" >> .gitignore
+    fi
+done
+# .mcp.json is NOT gitignored — it must be committed for team-wide graph activation
+_success ".gitignore updated"
+
+# ── STEP 8: Summary and handoff ───────────────────────────────────────────────
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "${GREEN} Installation complete${RESET}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "What was installed:"
+echo "  ✓ Dev guide:      ${DEV_GUIDE_DST}"
+echo "  ✓ Init package:   ${INIT_PKG_DST}"
+echo "  ✓ Gate ledger:    .claude/gate_state.json"
+echo "  ✓ Git hooks:      .githooks/ (pre-commit, pre-push, gate.sh)"
+echo "  ✓ CI workflow:    .github/workflows/gate.yml (CI parity backstop)"
+if [ "$BASKET" = "brownfield" ]; then
+echo "  ✓ Debt baseline:  .claude/baseline.json (unpopulated — init prompt fills it)"
+fi
+echo "  ✓ Org policy:     ${ORG_POLICY_PATH} (WEEKLY_LIMIT=${DEFAULT_WEEKLY_LIMIT}, daily=$(( DEFAULT_WEEKLY_LIMIT * DEFAULT_DAILY_BUDGET_PCT / 100 )) tokens)"
+if $GRAPH_INSTALLED 2>/dev/null; then
+echo "  ✓ Graph server:   code-review-graph ${GRAPH_PACKAGE##*==} (${GRAPH_BIN_PATH})"
+echo "  ✓ MCP config:     .mcp.json (committed — team-wide graph activation)"
+else
+echo "  ⚠ Graph server:   skipped (install manually: pipx install ${GRAPH_PACKAGE})"
+fi
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo -e "${BLUE} ONE REMAINING STEP — required to complete setup:${RESET}"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo ""
+echo "  1. Open Claude Code in this directory:"
+echo "     claude"
+echo ""
+echo "  2. In ${INIT_PKG_DST}, locate the 'SYSTEM PROMPT' section."
+echo "     Paste ONLY that section as your first message."
+echo "     Claude Code will:"
+echo "     • Generate CLAUDE.md (repo-specific constitution)"
+echo "     • Generate stack-specific gate.sh commands"
+echo "     • Complete the governance scaffold"
+echo "     • Run Phase C verification"
+echo ""
+echo "  3. Keep ${INIT_PKG_DST} locally for reference — do NOT paste"
+echo "     the entire document, only the SYSTEM PROMPT section."
+echo ""
+echo "  After the init commit, your repo is fully governed."
+echo ""

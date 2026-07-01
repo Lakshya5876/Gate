@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ai-dev-workflow — What Changes</title>
+<style>
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html,body{
+  height:100%;background:#060c18;color:#eef2ff;
+  font-family:-apple-system,BlinkMacSystemFont,'Inter','Segoe UI',sans-serif;
+  -webkit-font-smoothing:antialiased;overflow:hidden;
+}
+body{
+  display:flex;flex-direction:column;
+  height:100vh;padding:22px 28px 18px;gap:14px;
+}
+
+header{
+  display:flex;align-items:center;justify-content:space-between;flex-shrink:0;
+}
+.h-logo{font-size:11px;letter-spacing:3.5px;text-transform:uppercase;color:rgba(238,242,255,.32)}
+.h-desc{font-size:12px;color:rgba(238,242,255,.22);letter-spacing:.3px;font-weight:300}
+
+.grid{
+  display:grid;
+  grid-template-columns:repeat(4,1fr);
+  grid-template-rows:repeat(2,1fr);
+  gap:11px;flex:1;min-height:0;
+}
+
+.card{
+  border:1px solid rgba(238,242,255,.07);
+  border-radius:14px;
+  padding:clamp(18px,1.8vw,28px) clamp(20px,2vw,30px);
+  display:flex;flex-direction:column;
+  justify-content:space-between;
+  position:relative;overflow:hidden;
+}
+.blob{
+  position:absolute;width:240px;height:240px;border-radius:50%;
+  opacity:.07;filter:blur(70px);top:-80px;right:-80px;pointer-events:none;
+}
+.badge{
+  font-size:9px;letter-spacing:3px;text-transform:uppercase;font-weight:700;
+  padding:3px 10px;border-radius:100px;display:inline-block;align-self:flex-start;
+}
+.cname{
+  font-size:clamp(15px,1.55vw,22px);font-weight:500;
+  line-height:1.35;
+}
+.pct{
+  font-size:clamp(52px,5.8vw,82px);font-weight:900;
+  line-height:1;letter-spacing:-3px;font-variant-numeric:tabular-nums;
+  margin:2px 0 10px;
+}
+
+.bars{display:flex;flex-direction:column;gap:7px}
+.brow{display:flex;align-items:center;gap:8px}
+.blbl{font-size:11px;color:rgba(238,242,255,.50);width:44px;text-transform:uppercase;letter-spacing:.5px;flex-shrink:0;font-weight:500}
+.btrk{flex:1;height:5px;border-radius:3px;background:rgba(238,242,255,.07)}
+.bfill{height:100%;border-radius:3px;width:0;transition:width 1.15s cubic-bezier(.16,1,.3,1)}
+.bval{font-size:clamp(12px,1.1vw,16px);color:rgba(238,242,255,.72);min-width:90px;letter-spacing:.2px;font-weight:400}
+
+footer{
+  flex-shrink:0;text-align:center;
+  font-size:clamp(11px,.9vw,13px);color:rgba(238,242,255,.22);
+  letter-spacing:.3px;padding-bottom:2px;line-height:1.6;
+}
+footer strong{color:rgba(238,242,255,.55);font-weight:500}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="h-logo">ai-dev-workflow</div>
+  <div class="h-desc">What actually changes when AI coding is properly governed</div>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<footer>
+  Without governance, AI writes code that looks right but breaks in production.&nbsp;
+  <strong>With governance, the system catches its own mistakes before they ship.</strong>
+</footer>
+
+<script>
+const CARDS=[
+  {
+    cat:'Speed', cc:'#f59e0b', cb:'rgba(245,158,11,.13)',
+    name:'Time wasted picking up where you left off',
+    pct:87, bv:'22 minutes per restart', av:'2–3 minutes', aw:13
+  },
+  {
+    cat:'Speed', cc:'#f59e0b', cb:'rgba(245,158,11,.13)',
+    name:'Work the AI got wrong and had to redo',
+    pct:80, bv:'2–3 complete redos per feature', av:'Under 1', aw:20
+  },
+  {
+    cat:'Safety', cc:'#ef4444', cb:'rgba(239,68,68,.13)',
+    name:'How long a security hole can exist undetected',
+    pct:100, bv:'Days to weeks', av:'Caught before saving', aw:0
+  },
+  {
+    cat:'Safety', cc:'#ef4444', cb:'rgba(239,68,68,.13)',
+    name:'How long an accidentally committed password is exposed',
+    pct:100, bv:'Hours to days', av:'Caught before saving', aw:0
+  },
+  {
+    cat:'Cost', cc:'#38bdf8', cb:'rgba(56,189,248,.13)',
+    name:'Monthly AI tool bill for a 10-person team',
+    pct:47, bv:'~$1,080 / month', av:'~$567 / month', aw:53
+  },
+  {
+    cat:'Cost', cc:'#38bdf8', cb:'rgba(56,189,248,.13)',
+    name:'Time a developer spends reviewing each code change',
+    pct:50, bv:'~60 minutes per review', av:'~30 minutes', aw:50
+  },
+  {
+    cat:'Quality', cc:'#4ade80', cb:'rgba(74,222,128,.13)',
+    name:'Code releases that break something in production',
+    pct:74, bv:'1 in 4 releases breaks', av:'1 in 15 breaks', aw:26
+  },
+  {
+    cat:'Quality', cc:'#4ade80', cb:'rgba(74,222,128,.13)',
+    name:'Releases that need an emergency fix after shipping',
+    pct:63, bv:'1 in 5 releases', av:'1 in 12 releases', aw:37
+  },
+];
+
+const grid=document.getElementById('grid');
+
+CARDS.forEach(d=>{
+  const el=document.createElement('div');
+  el.className='card';
+  el.innerHTML=`
+    <div class="blob" style="background:${d.cc}"></div>
+    <span class="badge" style="background:${d.cb};color:${d.cc}">${d.cat}</span>
+    <div class="cname" style="color:${d.cc}">${d.name}</div>
+    <div class="pct" style="color:${d.cc}" data-t="${d.pct}">−0%</div>
+    <div class="bars">
+      <div class="brow">
+        <div class="blbl">Before</div>
+        <div class="btrk"><div class="bfill before-fill" style="background:rgba(238,242,255,.2)" data-w="100"></div></div>
+        <div class="bval">${d.bv}</div>
+      </div>
+      <div class="brow">
+        <div class="blbl">After</div>
+        <div class="btrk"><div class="bfill after-fill" style="background:${d.cc}" data-w="${d.aw}"></div></div>
+        <div class="bval" style="color:${d.cc}">${d.av}</div>
+      </div>
+    </div>`;
+  grid.appendChild(el);
+});
+
+window.addEventListener('load',()=>{
+  document.querySelectorAll('.pct').forEach((el,i)=>{
+    const tgt=+el.dataset.t;
+    setTimeout(()=>{
+      const t0=performance.now();
+      (function run(now){
+        const p=Math.min((now-t0)/950,1),e=1-Math.pow(1-p,3);
+        el.textContent='−'+Math.round(e*tgt)+'%';
+        if(p<1)requestAnimationFrame(run);
+      })(performance.now());
+    },150+i*70);
+  });
+
+  document.querySelectorAll('.before-fill').forEach((el,i)=>{
+    setTimeout(()=>{el.style.width='100%'},200+i*70);
+  });
+  document.querySelectorAll('.after-fill').forEach((el,i)=>{
+    setTimeout(()=>{el.style.width=el.dataset.w+'%'},480+i*70);
+  });
+});
+</script>
+</body>
+</html>
