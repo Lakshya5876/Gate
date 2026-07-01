@@ -429,11 +429,28 @@ questions)
         "Read(**/.aws/credentials)", plus the equivalent Bash cat patterns,
         and TRUST-ROOT writes for the files install.sh itself owns (never
         agent-generated, so safe to lock from install time): "Write(.githooks/**)",
-        "Edit(.githooks/**)", "Write(.claude/gate_integrity.sha256)",
-        "Edit(.claude/gate_integrity.sha256)" — without this, an agent that
-        weakens .githooks/gate.sh can simply regenerate the pinned hash to
-        match in the same turn, and the CI content-check added in Module A6
-        verifies nothing; only a human-authored PR may move this pin,
+        "Edit(.githooks/**)", "Write(.claude/hooks/**)", "Edit(.claude/hooks/**)"
+        (Module A10 — this is the Bash-guard hook's OWN script; without this
+        an agent can overwrite it with a one-line no-op while its
+        `hooks.PreToolUse` registration stays intact in settings.json, making
+        the guard LOOK active while doing nothing — a stealthier bypass than
+        any of the ones the guard itself closes),
+        "Write(.claude/gate_integrity.sha256)", "Edit(.claude/gate_integrity.sha256)"
+        — without this, an agent that weakens .githooks/gate.sh can simply
+        regenerate the pinned hash to match in the same turn, and the CI
+        content-check added in Module A6 verifies nothing; only a
+        human-authored PR may move this pin,
+        "Write(.claude/gate_state.json)", "Edit(.claude/gate_state.json)"
+        (Module A10 — this is the gate's own ledger: receipts, token spend,
+        the audit log. An agent that can Write/Edit it directly can fabricate
+        a passing receipt or reset its own token budget, defeating every
+        other control in this chain. gate.sh's own legitimate mutations run
+        via a git-hook subprocess calling python3 directly — never through
+        Claude Code's Write/Edit tools — so this denial has zero effect on
+        gate.sh's normal operation, only on the agent's own tool calls),
+        "Write(.mcp.json)", "Edit(.mcp.json)" (Module A10 — controls which
+        MCP servers Claude Code connects to; install.sh-owned, static after
+        install, never agent-edited),
         "Write(.github/workflows/gate.yml)", "Edit(.github/workflows/gate.yml)"
         (Module A9 — the CI workflow file that INVOKES the whole integrity
         chain was itself unprotected through three rounds of hardening;
@@ -460,11 +477,30 @@ questions)
         CRITICAL EXECUTION ORDER note above — never before CLAUDE.md,
         baseline.json, and settings.json's own allow-list are fully written
       - The Bash-matcher guard hook (`.claude/hooks/pre_bash_trust_root_guard.sh`)
-        deliberately protects only .githooks/, gate_integrity.sha256, and the
-        dev-guide/init-package filenames — NOT CLAUDE.md/settings.json/
-        baseline.json, since you legitimately need to reference those via
-        Bash/python during this very phase (reading current state, merging
-        JSON). Do not add them to that hook's protected-paths array.
+        deliberately protects .githooks/, .claude/hooks/ (itself),
+        gate_integrity.sha256, .claude/gate_state.json,
+        .github/workflows/gate.yml, .mcp.json, and the dev-guide/init-package
+        filenames — NOT CLAUDE.md/settings.json/baseline.json, since you
+        legitimately need to reference those via Bash/python during this very
+        phase (reading current state, merging JSON). Do not add them to that
+        hook's protected-paths array.
+      - The trust-root deny-list has exactly ONE source of truth: a single
+        `REQUIRED_DENY` Python list inside `_write_trust_root_settings` in
+        install.sh, shared by both the fresh-install and the idempotent-merge
+        code paths (`os.path.exists` selects which branch runs). There is no
+        second hand-authored copy anywhere to fall out of sync — do not
+        introduce one; if you need to check what install.sh already wrote,
+        read `.claude/settings.json` directly.
+      - `.claude/gate_integrity.sha256` is a multi-file manifest (native
+        `sha256sum`/`shasum -a 256` check format — one `<hash>  <path>` line
+        per file), not a single hash. It covers every static,
+        install.sh-owned governance script: `.githooks/gate.sh`,
+        `.githooks/verify_governance_integrity.sh`, `.githooks/pre-commit`,
+        `.githooks/pre-push`, and `.claude/hooks/pre_bash_trust_root_guard.sh`.
+        `verify_governance_integrity.sh` checks all five with one
+        `sha256sum -c` / `shasum -a 256 -c` call. Do not narrow this back to
+        checking only gate.sh — the whole point is that weakening any one of
+        the five scripts in the enforcement chain is caught the same way.
       - git push appears in NEITHER list (Guide §2.3 — it must prompt
         interactively, not be silently allowed or hard-blocked)
 
@@ -613,7 +649,9 @@ questions.
 1. Review the generated CLAUDE.md once, end to end. It governs everything.
 2. Verify hooks are active: `git config core.hooksPath` must print `.githooks`.
 3. Commit the governance files on your setup branch:
-   `git add CLAUDE.md .claude/settings.json .claude/baseline.json .claude/gate_integrity.sha256 .claude/hooks/ .claude/commands/ .githooks/ quarantine.txt .team_aliases .gitignore`
+   `git add CLAUDE.md .claude/settings.json .claude/baseline.json .claude/gate_integrity.sha256 .claude/hooks/ .claude/commands/ .githooks/ .github/workflows/gate.yml .mcp.json quarantine.txt .team_aliases .gitignore`
+   (`.mcp.json` only if the graph server installed successfully — omit if
+   install.sh reported "Graph server: skipped")
    `git commit -m "chore(claude): initialize agentic engineering environment"`
    (The pre-commit hook fires on this very commit — that's the system working.)
 4. Open a PR — your team should see and approve the constitution like any code.

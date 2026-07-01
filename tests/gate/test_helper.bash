@@ -5,6 +5,8 @@ FRAMEWORK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE_SH_SRC="${FRAMEWORK_ROOT}/templates/gate.sh"
 GATE_STATE_SRC="${FRAMEWORK_ROOT}/templates/gate_state.json"
 VERIFY_INTEGRITY_SRC="${FRAMEWORK_ROOT}/templates/verify_governance_integrity.sh"
+PRE_COMMIT_SRC="${FRAMEWORK_ROOT}/templates/pre-commit"
+PRE_PUSH_SRC="${FRAMEWORK_ROOT}/templates/pre-push"
 
 setup_gate_repo() {
     TEST_REPO="$(mktemp -d "${TMPDIR:-/tmp}/gate-test-XXXXXX")"
@@ -19,7 +21,9 @@ setup_gate_repo() {
     cp "$GATE_SH_SRC" .githooks/gate.sh
     cp "$GATE_STATE_SRC" .claude/gate_state.json
     cp "$VERIFY_INTEGRITY_SRC" .githooks/verify_governance_integrity.sh
-    chmod +x .githooks/gate.sh .githooks/verify_governance_integrity.sh
+    cp "$PRE_COMMIT_SRC" .githooks/pre-commit
+    cp "$PRE_PUSH_SRC" .githooks/pre-push
+    chmod +x .githooks/gate.sh .githooks/verify_governance_integrity.sh .githooks/pre-commit .githooks/pre-push
 
     git checkout -b feature/gate-test -q
     echo "# gate test repo" > README.md
