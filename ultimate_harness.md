@@ -4051,3 +4051,330 @@ claude_md_hash          → SHA-256 of CLAUDE.md for drift detection
 *End of ultimate_harness.md — Curriculum complete.*
 
 *All code verbatim from commit `a7d3c04` (HEAD), incorporating patches from `630d3ad` (process-tree detection + graph kill-restart lifecycle) and `b400d7d` (date spoofing fix).*
+
+---
+
+<a name="addenda"></a>
+# ADDENDA — Post-Publication Corrections & Updates
+
+*Added after initial publication. These sections address pedagogical gaps identified in review and document changes made after the curriculum was first written.*
+
+---
+
+## A1. The Three-Tree Model and Why git write-tree Reads the Index
+
+**Fills gap in:** Module 1 (Git Internals) and Module 8.2 (Receipt System)
+
+### The Three Trees
+
+Git maintains three distinct data structures at all times:
+
+```
+WORKING TREE          GIT INDEX (Staging Area)     OBJECT STORE (Commits)
+─────────────         ────────────────────────     ──────────────────────
+Files on disk         .git/index (binary file)     .git/objects/
+Dirty, uncommitted    Snapshot of what will         Immutable, hashed,
+Changes visible to    be committed next              permanent history
+your editor           git add moves here
+```
+
+These are three **separate states**. A file can simultaneously be:
+- Modified in the working tree (editor changes)
+- Staged in the index (git add)
+- In the last commit (object store)
+
+All three versions can be different. This is not a bug — it's a feature. The index is a scratchpad for assembling the next commit.
+
+### What git write-tree Actually Reads
+
+```bash
+git write-tree
+```
+
+This command:
+1. Reads the Git Index binary file (`.git/index`)
+2. For each entry in the index, looks up the blob object SHA
+3. Recursively builds tree objects for each directory
+4. Returns the SHA-1 of the root tree object
+
+**Critical:** `git write-tree` reads ONLY from the index. It does NOT read from the working tree. Unstaged changes to files on disk are completely invisible to it.
+
+```bash
+# Demonstration:
+echo "clean content" > file.py
+git add file.py                       # file.py enters the index
+echo "dirty change" >> file.py        # working tree modified
+git write-tree                        # produces hash of "clean content" version
+                                      # "dirty change" is NOT in the hash
+```
+
+This is why `COMMIT_TREE_FP = git write-tree` in the pre-commit hook is the correct fingerprint for "what is about to be committed" — it hashes exactly the index contents, which is exactly what `git commit` will commit.
+
+### Why This Matters for the Gate
+
+```
+Developer edits auth.py (working tree)
+     ↓
+git add auth.py  →  index now contains the edited auth.py
+     ↓
+pre-commit fires  →  gate.sh  →  git write-tree  →  hash of index
+     →  COMMIT_TREE_FP = "4b825dc..."
+     →  gate checks auth.py (from index)  →  pass
+     →  receipt written for "4b825dc..."
+     ↓
+Developer edits auth.py AGAIN without staging (working tree dirty)
+     ↓
+git push  →  pre-push fires  →  git rev-parse HEAD^{tree}
+     →  COMMIT_TREE_FP = "4b825dc..."  (same — the commit has the pre-edit version)
+     →  receipt found  →  fast path  →  push proceeds
+
+The un-staged second edit never touched the index, never entered the commit,
+and is correctly excluded from the receipt fingerprint.
+```
+
+### The Index Binary Format (Brief)
+
+`.git/index` is a binary file, not human-readable. Its structure:
+- Header: magic bytes `DIRC`, version number, entry count
+- Entries: each file's metadata (mode, ctime, mtime, size, SHA-1, flags, filename)
+- Extensions: optional TREE extension (cached tree hashes), REUC (reuse undo conflict)
+
+You can inspect it with: `git ls-files --stage` (human-readable dump of the index).
+
+---
+
+## A2. Python Dict Traversal Mechanics in _json_get and _json_set
+
+**Fills gap in:** Module 4.5 (gate.sh helper functions)
+
+### The Full _json_get Implementation Explained
+
+```python
+def _json_get(file, dotted_key):
+    with open(file) as f:
+        d = json.load(f)          # parse entire JSON file into Python dict
+    keys = dotted_key.split('.')  # "token.token_spent_today" → ["token", "token_spent_today"]
+    v = d                         # start at the root dict
+    for k in keys:
+        if k == '': break         # guard against trailing dot: "token." → ["token", ""]
+        v = v.get(k, '')          # descend one level; return '' if key missing
+    print(v if v is not None else '')
+```
+
+**`v.get(k, '')`** — Python's `dict.get(key, default)` returns `default` if `key` is absent. This is safe: a missing key returns `''`, not a KeyError. Bash receives the empty string and the gate treats it as null/missing.
+
+**What happens when the value is a dict (not a leaf):**
+```python
+# gate_state.json: {"last_pass_sha": {"feature/billing": "abc123"}}
+# _json_get gate_state.json "last_pass_sha"
+keys = ["last_pass_sha"]
+v = d.get("last_pass_sha", '') → {"feature/billing": "abc123"}   # returns the dict
+print(v) → "{'feature/billing': 'abc123'}"  # Python repr of dict — not useful
+```
+This is why you always key down to a leaf: `_json_get gate_state.json "last_pass_sha.feature/billing"` returns the string `abc123`.
+
+---
+
+### The Full _json_set Implementation Explained
+
+```python
+def _json_set(file, dotted_key, value):
+    with open(file) as f:
+        d = json.load(f)
+    keys = dotted_key.split('.')           # "last_pass_sha.feature/billing"
+                                           # → ["last_pass_sha", "feature/billing"]
+    obj = d
+    for k in keys[:-1]:                    # iterate all keys EXCEPT the last
+        obj = obj.setdefault(k, {})        # descend, creating missing dicts on the fly
+    val = value                            # the raw string from bash: '"abc123"'
+    try:
+        obj[keys[-1]] = json.loads(val)    # try to parse as JSON: '"abc123"' → str "abc123"
+    except:
+        obj[keys[-1]] = val                # fallback: store the raw string
+    with open(file, 'w') as f:
+        json.dump(d, f, indent=2)
+```
+
+**`keys[:-1]`** — Python slice notation. For a list `["a", "b", "c"]`:
+- `[:-1]` returns `["a", "b"]` (all but last)
+- `[-1]` returns `"c"` (last element)
+- `[1:]` returns `["b", "c"]` (all but first)
+
+So `for k in keys[:-1]` iterates every level EXCEPT the final key — these are the "path" segments you need to descend into. The final key is the one you actually assign to.
+
+**`setdefault(k, {})`** — Python's `dict.setdefault(key, default)`:
+- If `key` exists: returns its current value (does NOT overwrite)
+- If `key` missing: inserts `key: default` and returns `default`
+
+This creates the entire nested path on the fly:
+```python
+d = {}
+obj = d
+obj = obj.setdefault("last_pass_sha", {})   # d is now {"last_pass_sha": {}}
+                                              # obj is now the inner {}
+obj["feature/billing"] = "abc123"            # inner dict now has the key
+# d is now {"last_pass_sha": {"feature/billing": "abc123"}}
+```
+
+**`json.loads(val)`** — deserializes the bash-passed value. Bash passes `'"abc123"'` (a JSON string literal including its outer quotes). `json.loads('"abc123"')` returns the Python string `abc123` without quotes. If parsing fails (val is a plain bash variable like `true` without JSON syntax), the except clause stores the raw string.
+
+---
+
+## A3. Git Notes Remote Syncing — The Refspec Gap
+
+**Fills gap in:** Module 1.6 (git notes) and Module 9 (Bypass System)
+
+### The Problem: git fetch Ignores Notes by Default
+
+```bash
+# Developer A bypasses, logs reason, and pushes the note:
+SKIP_GATE=1 git commit -m "hotfix: urgent"
+# → git notes appended to refs/notes/bypasses
+git push origin refs/notes/bypasses   # explicitly pushed
+
+# Developer B runs:
+git fetch origin   # standard fetch
+git log --show-notes=bypasses   # shows nothing — note is invisible
+```
+
+Why? Git's default fetch refspec only maps:
+```
++refs/heads/*:refs/remotes/origin/*
+```
+Heads (branches) map to remote-tracking branches. `refs/notes/*` is not in `refs/heads/*` — it's a completely separate namespace. Standard `git fetch` ignores it entirely.
+
+### The Fix: Configure the Notes Fetch Refspec
+
+Each team member needs this configuration in their local `.git/config`:
+```ini
+[remote "origin"]
+    fetch = +refs/heads/*:refs/remotes/origin/*
+    fetch = +refs/notes/*:refs/notes/*
+```
+
+Command to add it:
+```bash
+git config --add remote.origin.fetch '+refs/notes/*:refs/notes/*'
+```
+
+After this, `git fetch origin` also fetches all notes namespaces. Developer B can now see Developer A's bypass record.
+
+### Automating This in install.sh
+
+The bootstrap should configure the notes refspec automatically:
+```bash
+git config --add remote.origin.fetch '+refs/notes/*:refs/notes/*'
+_success "Git notes fetch refspec configured for bypass audit trail sync"
+```
+
+This is not currently in install.sh (a known gap). Teams using multi-developer bypass auditing need to add this manually or add it to their setup script.
+
+### What Happens Without This Config
+
+```
+Timeline on a 5-person team:
+
+Day 1:  Alice bypasses → pushes note to refs/notes/bypasses
+Day 2:  Bob, Carol, Dave, Eve all git fetch → notes NOT fetched
+Day 3:  Manager runs "git log --show-notes=bypasses --all" → sees NOTHING
+        The bypass audit trail is invisible to everyone except Alice.
+
+This is a silent failure — no error, no warning. The audit trail exists on
+the remote but nobody's local clone knows it.
+```
+
+### The Full Audit Flow With Correct Config
+
+```bash
+# Set up (once per clone):
+git config --add remote.origin.fetch '+refs/notes/*:refs/notes/*'
+
+# Now the flow works end-to-end:
+# 1. Alice bypasses and pushes the note:
+git push origin refs/notes/bypasses
+
+# 2. Bob fetches (with refspec configured):
+git fetch origin
+# → refs/notes/bypasses is now synced locally
+
+# 3. Bob audits:
+git log --all --show-notes=bypasses | grep -A3 "BYPASS"
+# → shows Alice's bypass record with timestamp and reason
+```
+
+---
+
+## A4. Post-Creation Changes — Token Budget & Install.sh Update
+
+*Changes made in the session after ultimate_harness.md was first committed.*
+
+### What Changed
+
+After the curriculum was written, a review of `~/.claude/org_policy.json` revealed that the installed token budget (50,000/day) did not match the intent of the $20/month per-seat plan (~250,000 tokens/day), and that `install.sh`'s `DEFAULT_WEEKLY_LIMIT` (1,000,000) was mathematically inconsistent with that target.
+
+**Two files were updated:**
+
+| File | Field | Before | After | Why |
+|------|-------|--------|-------|-----|
+| `~/.claude/org_policy.json` | `TOKEN_BUDGET` | 50,000 | 250,000 | Match $20/month seat plan |
+| `install.sh` | `DEFAULT_WEEKLY_LIMIT` | 1,000,000 | 1,250,000 | 1,250,000 × 20% = 250,000/day |
+
+The math invariant: `WEEKLY_LIMIT × DAILY_BUDGET_PCT ÷ 100 = TOKEN_BUDGET`. Previously: 1,000,000 × 20% = 200,000 ≠ 50,000 (two different mismatches in the same system). After: 1,250,000 × 20% = 250,000 = TOKEN_BUDGET (consistent everywhere).
+
+### Three Codebase Bugs Patched in the Same Session
+
+Also in the same session, three bugs identified in the post-publication review (see the "Original Product & Codebase Gaps" analysis) were patched in `templates/gate.sh`:
+
+**Bug 1 — LAST_SHA cross-branch contamination (STEP 4 + STEP 8)**
+
+`last_pass_sha` was a single global string. Switching branches could cause `git diff LAST_SHA..HEAD` to compute a diff across unrelated lineages, silently dropping files from the incremental scan.
+
+Fix: `last_pass_sha` is now a dict keyed by branch name (dots in branch names replaced with underscores):
+```json
+"last_pass_sha": {
+  "feature/billing": "abc123",
+  "bugfix/auth-fix": "def456"
+}
+```
+Read: `_json_get gate_state.json "last_pass_sha.feature/billing"`  
+Write: `_json_set gate_state.json "last_pass_sha.feature/billing" '"abc123"'`
+
+`gate_state.json` template updated: `"last_pass_sha": {}` (was `null`).
+
+**Bug 2 — Audit log inflation (no intra-day cap)**
+
+The 90-day pruning window cuts nothing when all entries share today's timestamp. An AI agent in a loop could generate thousands of entries per hour.
+
+Fix: hard cap of 1,000 entries, applied after the 90-day filter:
+```python
+MAX_AUDIT_ENTRIES = 1000
+if len(log) > MAX_AUDIT_ENTRIES:
+    log = log[-MAX_AUDIT_ENTRIES:]   # keep the most recent 1,000
+```
+
+**Bug 3 — PID reuse zombie killer (low-probability, high-impact)**
+
+`kill -9` was fired on any live PID found in `.claude/graph.pid` without verifying the process was actually `code-review-graph`. OS PID reuse could cause an unrelated process (IDE, database, SSH agent) to be killed.
+
+Fix: verify process identity before killing:
+```bash
+_GF_CMD=$(ps -p "$_GF_PID" -o command= 2>/dev/null | tr -d '\n' || echo "")
+if echo "$_GF_CMD" | grep -q "code-review-graph"; then
+    kill -9 "$_GF_PID" 2>/dev/null || true
+else
+    # PID reused by unrelated process — skip kill, remove stale pid file
+    rm -f "$_GF_PID_FILE"
+    return 0
+fi
+```
+
+### PR History
+
+| PR | Branch | Target | Status | Contents |
+|----|--------|--------|--------|----------|
+| [#1](https://github.com/BankofLoyal/ai-dev-workflow/pull/1) | `init_release` | `develop` | Merged | Full v1 framework scaffolding |
+| [#2](https://github.com/BankofLoyal/ai-dev-workflow/pull/2) | `feat/token-budget-limits` | `develop` | Open | Token budget fix + curriculum + bug patches |
+
+---
+
+*ultimate_harness.md is a living document. Addenda are appended as bugs are found and fixes are shipped.*

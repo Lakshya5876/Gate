@@ -4,7 +4,7 @@
   "framework_version": "1.0.0",
   "framework_last_upgrade": null,
 
-  "last_pass_sha": null,
+  "last_pass_sha": {},
   "last_pass_timestamp": null,
 
   "thresholds": {

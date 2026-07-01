@@ -91,6 +91,9 @@ log = d.get('token', {}).get('token_audit_log', [])
 log.append(entry)
 cutoff = (datetime.utcnow() - timedelta(days=90)).isoformat()
 log = [e for e in log if e.get('timestamp','') >= cutoff]
+MAX_AUDIT_ENTRIES = 1000
+if len(log) > MAX_AUDIT_ENTRIES:
+    log = log[-MAX_AUDIT_ENTRIES:]
 d.setdefault('token', {})['token_audit_log'] = log
 with open('$GATE_STATE', 'w') as f:
     json.dump(d, f, indent=2)
@@ -166,8 +169,15 @@ _ensure_graph_freshness() {
     if [ -f "$_GF_PID_FILE" ]; then
         _GF_PID=$(cat "$_GF_PID_FILE" 2>/dev/null)
         if [ -n "$_GF_PID" ] && kill -0 "$_GF_PID" 2>/dev/null; then
-            echo -e "${YELLOW}[GRAPH GUARD] Active indexer obsolete. Terminating stale process and restarting build for current HEAD...${RESET}" >&2
-            kill -9 "$_GF_PID" 2>/dev/null || true
+            _GF_CMD=$(ps -p "$_GF_PID" -o command= 2>/dev/null | tr -d '\n' || echo "")
+            if echo "$_GF_CMD" | grep -q "code-review-graph"; then
+                echo -e "${YELLOW}[GRAPH GUARD] Active indexer obsolete. Terminating stale process and restarting build for current HEAD...${RESET}" >&2
+                kill -9 "$_GF_PID" 2>/dev/null || true
+            else
+                echo -e "${YELLOW}[GRAPH GUARD] PID ${_GF_PID} reused by unrelated process — skipping kill.${RESET}" >&2
+                rm -f "$_GF_PID_FILE"
+                return 0
+            fi
         fi
         rm -f "$_GF_PID_FILE"
     fi
@@ -389,10 +399,13 @@ if [ -f ".mcp.json" ] && [ -f "$GATE_STATE" ]; then
 fi
 
 # ── STEP 4: DETERMINE SCAN SCOPE ──────────────────────────────────────────────
-# Incremental scan from last_pass_sha; cold start if null or missing
+# Incremental scan from last_pass_sha; cold start if null or missing.
+# last_pass_sha is keyed by branch to prevent cross-branch diff contamination:
+# switching from feature/alpha to feature/beta must not inherit alpha's LAST_SHA.
 LAST_SHA=""
+_BRANCH_KEY=$(echo "$CURRENT_BRANCH" | tr '.' '_')
 if [ -f "$GATE_STATE" ]; then
-    LAST_SHA=$(_json_get "$GATE_STATE" "last_pass_sha")
+    LAST_SHA=$(_json_get "$GATE_STATE" "last_pass_sha.${_BRANCH_KEY}")
 fi
 
 HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "INIT")
@@ -918,8 +931,9 @@ fi
 # ── STEP 8: ALL CHECKS PASSED — write receipt + advance ledger ────────────────
 # CRITICAL: last_pass_sha is written ONLY here, after all checks exit 0.
 # Never write it on entry or on cold-start — a mid-run block would poison the ledger.
+# Keyed by branch (_BRANCH_KEY) to prevent cross-branch diff contamination.
 if [ -f "$GATE_STATE" ]; then
-    _json_set "$GATE_STATE" "last_pass_sha" "\"${HEAD_SHA}\""
+    _json_set "$GATE_STATE" "last_pass_sha.${_BRANCH_KEY}" "\"${HEAD_SHA}\""
     _json_set "$GATE_STATE" "last_pass_timestamp" "\"${NOW_ISO}\""
     _json_set "$GATE_STATE" "token.token_spent_today" "$TOTAL_SPENT"
     # Clear session spend tmp after accumulating
