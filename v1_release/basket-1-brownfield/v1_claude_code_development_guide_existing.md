@@ -846,6 +846,29 @@ These rules apply at all times, regardless of graph availability:
 
 ---
 
+## 2.5.6a Scope Discipline — Minimum Footprint, No Drive-By Edits
+
+**Before finalizing any diff, self-check against both:**
+
+```
+MINIMUM FOOTPRINT:
+  - No abstraction introduced for a single call site
+  - No configurability/flags not requested in the task
+  - No error handling for states the current call graph cannot produce
+  - If the diff exceeds ~3x the lines a senior engineer would need, cut it down
+
+SURGICAL BOUNDARY:
+  - Every changed line must trace to the stated task
+  - Do not reformat, re-comment, or "clean up" adjacent code
+  - Match existing style even where you would choose differently
+  - Orphans YOUR change created: remove them. Pre-existing dead code: name
+    it, don't touch it, unless the task asked for it.
+```
+
+**Execution rule:** Run this check during PHASE 4 (Verification Loop), before the checkpoint write — not after the diff is already staged.
+
+---
+
 ## 2.5.7 Reflect Phase — Post-Commit Retrospective
 
 **After every successful commit (lines 3–5 only, appended to `.claude/progress.md`):**
@@ -989,6 +1012,28 @@ PHASE 5: OUTPUT
   Change manifest | test output verbatim | Conventional Commit msg
   >>> CHECKPOINT WRITE (always, unconditional) <<<
 ```
+
+### 3.2.1 Phase 2 — Assumption Declaration and Success Criteria
+
+Phase 2's existing rule ("Cannot answer something? STOP and ask. Never assume.") is binary — confident-and-proceed, or stop-and-ask. It has no middle path for a minor ambiguity that doesn't warrant a full stop. Two additions close this:
+
+**Assumption declaration.** If you CAN answer with reasonable confidence but multiple interpretations exist, don't pick silently — state it:
+
+```
+ASSUMING: [the interpretation you're proceeding on]
+ALTERNATIVE: [what would change if this is wrong]
+```
+
+This is a declaration, not a question — it does not block Phase 3. Reserve STOP-and-ask for cases where no interpretation is reasonably safe.
+
+**Success criteria.** Before Phase 3 begins, declare what "done" means for this specific task:
+
+```
+GOAL: [concrete, observable outcome]
+VERIFY: [specific test/command that confirms it — not "tests pass" generically]
+```
+
+Phase 4's Verification Loop already runs impacted tests mechanically; this makes explicit what those tests are being run *for*, so a checkpoint doesn't just report "tests passed" without stating which outcome that was supposed to prove.
 
 ### The Stubs-First Protocol — why it works
 

@@ -4757,3 +4757,38 @@ A completeness review of the curriculum (conducted after all prior addenda were 
 **What was missing:** `gate_state.json` contains `"execution_mode_log": []` which is never read or written by gate.sh v1.0. A learner reading the schema with no documentation for this field would assume it was a bug or a failed run.
 
 **What was added (§ 5.5.1):** The field is a reserved schema slot for a future feature that would audit which execution mode (MUST OUTPUT / HARD STOP / EXECUTE) each agent session declared. An empty array is the correct state in v1.0 installations. The section explains why the slot is scaffolded now (forward-compatibility, avoids schema migration when the feature ships).
+
+---
+
+## A6. Karpathy Behavioral Principles — Incorporated Into the Development Guides (2026-07-01)
+
+*Changes made in the session after A5 was committed.*
+
+### Source and Method
+
+A third-party repo, `multica-ai/andrej-karpathy-skills`, was cloned to `/tmp/eval/` and statically audited (no scripts executed, no install steps run — read-only file inspection only, per an explicit execution-boundary constraint). The repo packages four behavioral principles — attributed to [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on common LLM coding failure modes — as a single CLAUDE.md/SKILL.md pair with zero executable code.
+
+**Important scoping correction made during this work:** an earlier pass mistakenly evaluated the four principles against an unrelated project's CLAUDE.md (a different repo's engineering constitution, cross-referenced from prior context in the same session) rather than against ai-dev-workflow's own artifacts. ai-dev-workflow has no CLAUDE.md of its own — it is a framework that *generates* CLAUDE.md for downstream repos via the init prompt. The gap analysis and all edits below were redone grounded in the actual generator artifacts: the two development guides (`v1_claude_code_development_guide_existing.md` / `_new.md`) and the two implementation packages that specify what a generated CLAUDE.md must contain (§C1 brownfield / §B2 greenfield).
+
+### The Four Principles vs. What Already Existed
+
+| Principle | Status before this session |
+|---|---|
+| Think Before Coding (state assumptions, surface tradeoffs) | Partially present — Guide §2.5.6 (Challenge Phase) and Phase 2 already had a binary "confident → proceed, else STOP and ask" rule, but no middle path for stating an assumption while still proceeding |
+| Simplicity First (minimum code, no speculative features) | Absent — no rule anywhere constrained against single-use abstractions or unrequested configurability |
+| Surgical Changes (touch only what the task requires) | Absent as a code-editing principle — the word "surgical" existed only once, describing file*-reading* technique, not edit scope |
+| Goal-Driven Execution (declare verifiable success criteria) | Structurally present via Phase 4's Verification Loop and the checkpoint system, but nothing required stating what "done" meant before Phase 3 began |
+
+### What Was Changed
+
+Four insertions, mirrored across both the brownfield and greenfield baskets (six file edits total, all markdown, zero new dependencies, zero new files):
+
+**1. Guide §2.5.6a "Scope Discipline — Minimum Footprint, No Drive-By Edits"** (new section, inserted immediately after the existing §2.5.6 Challenge Phase in both `v1_claude_code_development_guide_existing.md` and `_new.md`). Combines Simplicity First and Surgical Changes into one pre-checkpoint self-check: no single-use abstractions, no unrequested configurability, no drive-by reformatting of adjacent code, remove only the orphans your own change created. Wired to run "during PHASE 4, before the checkpoint write — not after the diff is already staged."
+
+**2. Guide §3.2.1 "Phase 2 — Assumption Declaration and Success Criteria"** (new subsection, inserted immediately after the Phase 0–5 pipeline diagram in both guides). Adds the missing middle path to Phase 2's binary ask/proceed rule via an `ASSUMING:` / `ALTERNATIVE:` declaration format, and requires a `GOAL:` / `VERIFY:` pair before Phase 3 begins — giving Phase 4's mechanical test loop an explicit target to verify against, rather than a generic "tests passed."
+
+**3. Implementation package §C1 (brownfield) / §B2 (greenfield)** — the init-prompt spec listing what a generated CLAUDE.md must contain — gained one new bullet requiring the generated constitution to carry both the GOAL/VERIFY requirement and the Scope Discipline pre-checkpoint check forward into every downstream project, not just this framework's own guide.
+
+### Why Not a Verbatim Copy
+
+The source repo's CLAUDE.md was not copied in as a bolt-on file. It has no enforcement mechanism behind it — pure text, no gate. ai-dev-workflow already has Phase 2/4 checkpoints and a mechanical verification loop; threading the four principles into those existing gates (rather than adding an unenforced parallel document) means the additions inherit the same checkpoint-write and pre-push mechanics that already govern everything else the guide specifies.

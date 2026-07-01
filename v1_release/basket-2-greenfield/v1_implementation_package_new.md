@@ -254,6 +254,13 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         quarantine.txt with the core-coverage hard stop (T2), and
         ledger-enforced tier transition (T5) — with this stack's exact
         test commands
+      - A requirement (Guide §2.5.6a / §3.2.1) that PHASE 2's design
+        declaration always includes an explicit GOAL/VERIFY pair and, where
+        multiple interpretations exist, an ASSUMING/ALTERNATIVE declaration —
+        a checkpoint or commit lacking a stated verification target does not
+        satisfy the design-declaration requirement, even if tests happen to
+        pass; and the Scope Discipline check (Guide §2.5.6a) runs before
+        every checkpoint write, not after the diff is already staged
       - The auto-pipeline (recon -> contract -> execute -> output) and the
         commit/push gate INCLUDING mandatory push confirmation (Guide §5.3)
       - Checkpoint trigger rules C1–C5, the schema, and the resume protocol

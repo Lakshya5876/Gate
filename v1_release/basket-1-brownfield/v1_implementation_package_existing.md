@@ -367,6 +367,13 @@ questions)
       - Testing requirements referencing the 3-tier selection model (Guide §6)
         with the repo's EXACT test commands per tier, transitive-closure rule
         for CORE_FILES, and the grep-is-a-lower-bound escalation rule (T5)
+      - A requirement (Guide §2.5.6a / §3.2.1) that PHASE 2's design
+        declaration always includes an explicit GOAL/VERIFY pair and, where
+        multiple interpretations exist, an ASSUMING/ALTERNATIVE declaration —
+        a checkpoint or commit lacking a stated verification target does not
+        satisfy the design-declaration requirement, even if tests happen to
+        pass; and the Scope Discipline check (Guide §2.5.6a) runs before
+        every checkpoint write, not after the diff is already staged
       - The auto-pipeline (recon → contract → execute → output) and the
         commit/push gate including mandatory push confirmation, per Guide §5.3
       - Checkpoint trigger rules C1–C5 and the resume protocol, per Guide §4.1
