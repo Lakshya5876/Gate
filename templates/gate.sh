@@ -491,6 +491,17 @@ if [ "$GATE_TRIGGER" = "pre-push" ]; then
     RUN_TESTS="true"
 else
     COMMIT_TREE_FP=$(git write-tree 2>/dev/null || echo "")
+    # Unstaged-changes visibility warning: the gate checks the index only.
+    # Any tracked file modified in the working tree but not staged is invisible
+    # to COMMIT_TREE_FP and will not be inspected in this run. Surface them so
+    # the developer is aware before a blind amend or git commit -a could sneak
+    # them through (the only true bypass requires --no-verify at both boundaries).
+    _UNSTAGED=$(git diff --name-only 2>/dev/null | grep -v '^$' || true)
+    if [ -n "$_UNSTAGED" ]; then
+        echo -e "${YELLOW}⚠  GATE WARN: Tracked files with unstaged changes — NOT checked in this commit:${RESET}" >&2
+        echo "$_UNSTAGED" | sed 's/^/     /' >&2
+        echo -e "${YELLOW}   Amending with -a or adding these files before push will trigger a full gate re-run.${RESET}" >&2
+    fi
 fi
 
 # ── STEP 4.6: PRE-PUSH CHECKPOINT GATE ───────────────────────────────────────
