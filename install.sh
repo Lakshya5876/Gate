@@ -240,6 +240,7 @@ CMD=\$(python3 -c "import json,sys; print(json.load(sys.stdin).get('tool_input',
 PROTECTED_PATHS=(
     ".githooks/"
     ".claude/gate_integrity.sha256"
+    ".github/workflows/gate.yml"
     "${dev_guide_dst}"
     "${init_pkg_dst}"
 )
@@ -284,6 +285,7 @@ HOOKEOF
       "Bash(cat **/id_rsa*)", "Bash(cat **/.aws/credentials*)",
       "Write(.githooks/**)", "Edit(.githooks/**)",
       "Write(.claude/gate_integrity.sha256)", "Edit(.claude/gate_integrity.sha256)",
+      "Write(.github/workflows/gate.yml)", "Edit(.github/workflows/gate.yml)",
       "Write(${dev_guide_dst})", "Edit(${dev_guide_dst})",
       "Write(${init_pkg_dst})", "Edit(${init_pkg_dst})",
       "Bash(git notes*remove*)", "Bash(git update-ref -d*)",
@@ -329,6 +331,7 @@ REQUIRED_DENY = [
     "Bash(cat **/id_rsa*)", "Bash(cat **/.aws/credentials*)",
     "Write(.githooks/**)", "Edit(.githooks/**)",
     "Write(.claude/gate_integrity.sha256)", "Edit(.claude/gate_integrity.sha256)",
+    "Write(.github/workflows/gate.yml)", "Edit(.github/workflows/gate.yml)",
     f"Write({dev_guide_dst})", f"Edit({dev_guide_dst})",
     f"Write({init_pkg_dst})", f"Edit({init_pkg_dst})",
     "Bash(git notes*remove*)", "Bash(git update-ref -d*)",

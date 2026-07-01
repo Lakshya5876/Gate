@@ -4852,3 +4852,24 @@ Created `templates/verify_governance_integrity.sh`, containing the exact governa
 **A related, explicitly out-of-scope gap surfaced during this work, not fixed here:** `.github/workflows/gate.yml` itself (the deployed CI workflow file) is not in the trust-root deny-list — an agent could still weaken the wrapper step that invokes `verify_governance_integrity.sh`, or delete the step entirely. This gap predates this fix (it applied equally to the old inline YAML logic) and is unrelated to the duplication problem this addendum closes; it is noted here rather than folded in, consistent with keeping each fix scoped to the finding that motivated it.
 
 Module 10.10 in this document was updated to match — it previously quoted the old inline YAML verbatim, which the refactor made stale. Full suite: 24/24 passing, now exercising the real shared artifact instead of a hand-copy of it.
+
+---
+
+## A9. Protecting the CI Workflow File Itself (2026-07-02)
+
+*Changes made in the session after A8 was committed, in response to a fifth-pass audit of commit `34c0f94`.*
+
+### The Finding
+
+A8's own commit message disclosed, unprompted, that `.github/workflows/gate.yml` — the CI workflow file that *invokes* the entire integrity chain built across A6–A8 — was itself absent from both the trust-root deny-list (`install.sh`'s `REQUIRED_DENY`) and the Bash-guard hook's `PROTECTED_PATHS`. A fifth-pass audit verified this independently against the actual arrays (grepped both end to end, confirmed absent from each) and scored it more severely than the disclosure's own phrasing suggested: every prior fix in A6–A8 hardens what happens *inside* the CI check, but none of them protect the file that decides whether the check runs at all. An agent could delete the "Run governance gate" step, narrow the `on:` triggers so the workflow never fires, or remove the step entirely — no hash regeneration, no Bash-redirection trick, no obfuscation of any kind required. This was a simpler, fully undefended bypass of what the framework's own documentation calls "the authoritative backstop."
+
+### The Fix
+
+Added `.github/workflows/gate.yml` to the same two mechanisms every other install.sh-owned governance file already gets:
+
+- `Write(.github/workflows/gate.yml)` / `Edit(.github/workflows/gate.yml)` added to both the fresh-write JSON deny array and the Python `REQUIRED_DENY` merge list in `_write_trust_root_settings()`.
+- `.github/workflows/gate.yml` added to the Bash-guard hook's `PROTECTED_PATHS` array.
+
+No timing conflict analogous to the CLAUDE.md/baseline.json/settings.json exclusion applies here: `.github/workflows/gate.yml` is deployed by install.sh's own `_fetch` (a plain `cp`), never through Claude Code's tool-mediated Write/Edit, so it carries none of the "the agent needs to create this file first" constraint that kept those three files out of the install-time lock. It's install.sh-owned exactly like `.githooks/gate.sh` and `.githooks/verify_governance_integrity.sh`, and is now protected the same way they are.
+
+Verified directly: re-extracted `_write_trust_root_settings()` into an isolated scratch test, confirmed both new deny entries land in the generated `.claude/settings.json`, then ran the Bash guard against a realistic tampering command (`sed -i ... .github/workflows/gate.yml`, deleting the governance-gate step) — blocked. Full bats suite: 24/24 still passing. Both implementation packages' §C2/§B3 updated to document the new entries, with the reasoning inline so a future editor understands why this file needed the same protection as `.githooks/**`.

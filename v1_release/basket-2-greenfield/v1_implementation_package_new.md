@@ -316,6 +316,13 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         weakens .githooks/gate.sh can simply regenerate the pinned hash to
         match in the same turn, and the CI content-check added in Module A6
         verifies nothing; only a human-authored PR may move this pin,
+        "Write(.github/workflows/gate.yml)", "Edit(.github/workflows/gate.yml)"
+        (Module A9 — the CI workflow file that INVOKES the whole integrity
+        chain was itself unprotected through three rounds of hardening;
+        without this, an agent can gut the "Run governance gate" step or the
+        `on:` triggers directly, with none of the hash-pin or Bash-guard
+        machinery ever coming into play — a simpler, undefended bypass than
+        any of the ones those mechanisms close),
         "Write(v1_claude_code_development_guide_new.md)",
         "Edit(v1_claude_code_development_guide_new.md)",
         "Write(v1_implementation_package_new.md)",
