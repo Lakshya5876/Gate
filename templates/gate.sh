@@ -246,6 +246,26 @@ if [[ ! "$BRANCH_PREFIX" =~ ^(feature|bugfix|hotfix|release)$ ]] && [ -n "$CURRE
     # Warn only — do not block; human-facing warning is sufficient at gate level
 fi
 
+# Enforce code_writes_permitted from branch_strategy in gate_state.json.
+# release/* branches have code_writes_permitted=false — no new code, diff-review only.
+if [ -f "$GATE_STATE" ]; then
+    _CWP=$(python3 -c "
+import json, sys
+try:
+    with open(sys.argv[1]) as f:
+        d = json.load(f)
+    s = d.get('branch_strategy', {}).get(sys.argv[2], {})
+    print('false' if s.get('code_writes_permitted') is False else 'true')
+except Exception:
+    print('true')
+" "$GATE_STATE" "$BRANCH_PREFIX" 2>/dev/null || echo "true")
+    if [ "$_CWP" = "false" ]; then
+        echo -e "${RED}BRANCH BLOCK: Branch '$CURRENT_BRANCH' (strategy: ${BRANCH_PREFIX}) has code_writes_permitted=false.${RESET}" >&2
+        echo "Code writes are not permitted on ${BRANCH_PREFIX} branches. Use a feature or bugfix branch." >&2
+        exit 1
+    fi
+fi
+
 # ── STEP 2: TOKEN HARNESS ─────────────────────────────────────────────────────
 TODAY=$(date +%Y-%m-%d)
 GATE_TRIGGER="${GATE_TRIGGER:-pre-commit}"   # pre-commit or pre-push hook sets this
@@ -392,7 +412,7 @@ fi
 # Detect tiers from file paths
 HAS_BACKEND=false; HAS_FRONTEND=false
 while IFS= read -r f; do
-    [[ "$f" == backend/* ]] || [[ "$f" == src/* ]] || [[ "$f" == app/* ]] || [[ "$f" == *.py ]] && HAS_BACKEND=true
+    [[ "$f" == backend/* ]] || [[ "$f" == src/* ]] || [[ "$f" == app/* ]] || [[ "$f" == *.py ]] || [[ "$f" == *.java ]] || [[ "$f" == *.go ]] || [[ "$f" == *.rs ]] && HAS_BACKEND=true
     [[ "$f" == frontend/* ]] || [[ "$f" == *.tsx ]] || [[ "$f" == *.ts ]] || [[ "$f" == *.jsx ]] && HAS_FRONTEND=true
 done <<< "$CHANGED_FILES"
 
@@ -750,7 +770,11 @@ if $HAS_BACKEND && [ -n "$CHANGED_FILES" ]; then
 
         # Routes / controllers / presentation layer: must contain NO raw SQL
         if echo "$_lf" | grep -qiE '/(routes?|controllers?|presentation|views?|handlers?)/'; then
+            # Python: psycopg2 / raw SQL keywords
             _SQL=$(grep -nE '(SELECT|INSERT|UPDATE|DELETE|cursor\.execute|executemany|psycopg2\.connect)' "$_lf" 2>/dev/null | grep -v '^\s*#\|placeholder\|example' | head -3 || true)
+            # Java/Spring: JdbcTemplate, EntityManager, native queries in controllers
+            _SQL_JAVA=$(grep -nE '(JdbcTemplate|jdbcTemplate|entityManager\.createNativeQuery|@Query.*nativeQuery\s*=\s*true|\.prepareStatement\()' "$_lf" 2>/dev/null | grep -v '^\s*//' | head -3 || true)
+            _SQL="${_SQL}${_SQL_JAVA}"
             if [ -n "$_SQL" ]; then
                 LAYER_VIOLATIONS="${LAYER_VIOLATIONS}ROUTES_HAS_SQL ${_lf}:\n${_SQL}\n"
             fi
@@ -758,7 +782,11 @@ if $HAS_BACKEND && [ -n "$CHANGED_FILES" ]; then
 
         # Services / application layer: must contain NO raw SQL
         if echo "$_lf" | grep -qiE '/(services?|application|use.?cases?)/'; then
+            # Python: psycopg2 / raw SQL keywords
             _SQL=$(grep -nE '(SELECT|INSERT|UPDATE|DELETE|cursor\.execute|executemany|psycopg2\.connect)' "$_lf" 2>/dev/null | grep -v '^\s*#\|placeholder\|example' | head -3 || true)
+            # Java/Spring: JdbcTemplate, EntityManager, native queries in services
+            _SQL_JAVA=$(grep -nE '(JdbcTemplate|jdbcTemplate|entityManager\.createNativeQuery|@Query.*nativeQuery\s*=\s*true|\.prepareStatement\()' "$_lf" 2>/dev/null | grep -v '^\s*//' | head -3 || true)
+            _SQL="${_SQL}${_SQL_JAVA}"
             if [ -n "$_SQL" ]; then
                 LAYER_VIOLATIONS="${LAYER_VIOLATIONS}SERVICE_HAS_SQL ${_lf}:\n${_SQL}\n"
             fi
@@ -766,7 +794,11 @@ if $HAS_BACKEND && [ -n "$CHANGED_FILES" ]; then
 
         # Services / application layer: must NOT import HTTP framework directly
         if echo "$_lf" | grep -qiE '/(services?|application|use.?cases?)/'; then
+            # Python: FastAPI / Flask / Django HTTP imports
             _HTTP=$(grep -nE '^(from fastapi|import fastapi|from flask|import flask|from django\.http|APIRouter|@app\.(get|post|put|delete|patch)\()' "$_lf" 2>/dev/null | head -3 || true)
+            # Java/Spring: controller annotations or servlet types leaked into service layer
+            _HTTP_JAVA=$(grep -nE '(@RestController|@Controller|@RequestMapping|HttpServletRequest|HttpServletResponse|ResponseEntity|@GetMapping|@PostMapping|@PutMapping|@DeleteMapping)' "$_lf" 2>/dev/null | grep -v '^\s*//' | head -3 || true)
+            _HTTP="${_HTTP}${_HTTP_JAVA}"
             if [ -n "$_HTTP" ]; then
                 LAYER_VIOLATIONS="${LAYER_VIOLATIONS}SERVICE_HAS_HTTP ${_lf}:\n${_HTTP}\n"
             fi

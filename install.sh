@@ -110,7 +110,7 @@ if [ "${SKIP_GATE:-0}" = "1" ]; then
         echo "Bypass reason is required. Aborting." >&2
         exit 1
     fi
-    COMMITTER_DATE=$(git var GIT_COMMITTER_DATE 2>/dev/null | awk '{print $1}')
+    COMMITTER_DATE=$(date +%s)
     git notes --ref=refs/notes/bypasses append HEAD -m "BYPASS | date=${COMMITTER_DATE} | reason=${BYPASS_REASON}" 2>/dev/null || true
     echo "Gate bypassed. Reason logged to refs/notes/bypasses." >&2
     exit 0
@@ -366,18 +366,6 @@ with open('.claude/gate_state.json', 'w') as f:
 "
 _success "gate_state.json created"
 
-# quarantine.txt
-if [ ! -f "quarantine.txt" ]; then
-    cat > quarantine.txt << 'QUARANTINE'
-# QUARANTINE FILE — Claude Code Governance Framework
-# Tests listed here are known-flaky and are skipped by gate.sh tier selection.
-# Format: one test ID per line (pytest: path::TestClass::test_method)
-# Entries require a linked issue and an expiry date comment.
-# Example:
-#   tests/integration/test_payment.py::TestPayment::test_webhook_timeout  # GH#142 expires 2024-09-01
-QUARANTINE
-    _success "quarantine.txt created"
-fi
 
 # session_state.json (gitignored — ephemeral)
 echo '{"mode": null, "complexity_tier": null, "budget_pct_at_selection": null, "timestamp": null}' > .claude/session_state.json
