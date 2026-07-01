@@ -630,6 +630,45 @@ If you add a file to the amend, the tree hash changes, the receipt doesn't match
 
 SHA-1 was broken in 2017 (SHAttered attack). Git is migrating to SHA-256. For this project's purpose — detecting accidental changes and creating audit trails — SHA-1's properties are more than sufficient. The receipt system is not a cryptographic proof against an active adversary with SHA-1 collision capabilities; it is a mechanical check against accidental bypass and careless circumvention.
 
+### The Three-Tree Model — Why Unstaged Changes Are Invisible to git write-tree
+
+This is the most important concept for understanding the receipt system. Git maintains **three completely separate data structures** simultaneously:
+
+```
+WORKING TREE              GIT INDEX (Staging Area)      OBJECT STORE (Commits)
+────────────────          ─────────────────────────     ──────────────────────
+Files on your disk        .git/index  (binary file)     .git/objects/
+Edited by your editor     Built by: git add             Built by: git commit
+Dirty, uncommitted        Snapshot of what will         Immutable, hashed,
+No SHA, no version        be committed NEXT             permanent history
+```
+
+These are three **separate states**. A single file can simultaneously exist in all three trees with three different contents:
+
+```bash
+echo "v1" > auth.py && git add auth.py && git commit -m "v1"  # object store = v1
+echo "v2" >> auth.py && git add auth.py                        # index = v2
+echo "v3" >> auth.py                                            # working tree = v3
+
+git diff HEAD          # shows v1 → v3 (object store vs working tree)
+git diff --cached      # shows v1 → v2 (object store vs index)
+git diff               # shows v2 → v3 (index vs working tree)
+```
+
+**`git write-tree` reads ONLY from the index** (`.git/index` binary file). It does NOT touch the filesystem. Unstaged changes in the working tree are completely invisible to it:
+
+```bash
+echo "clean" > file.py
+git add file.py                 # index contains "clean"
+echo "dirty" >> file.py         # working tree now has "clean\ndirty"
+git write-tree                  # hashes the index → sees "clean" only
+                                # "dirty" does NOT appear in the hash
+```
+
+This is why `COMMIT_TREE_FP = git write-tree` is the correct fingerprint for "what is about to be committed." It hashes exactly what `git commit` will commit — the index — not the entire working tree.
+
+**Practical implication:** A developer with a dirty working tree (files edited but not staged) gets the same receipt as a developer with a clean working tree, provided their index contents are identical. The gate checks what will be committed, not what happens to be sitting on disk.
+
 ---
 
 ## 1.3 The .git/hooks Directory — What Git Does Before It Saves Work
@@ -792,6 +831,33 @@ Notes live in `refs/notes/<name>`. The default is `refs/notes/commits`.
 ```bash
 git push origin refs/notes/bypasses    # explicitly push notes
 git push origin 'refs/notes/*:refs/notes/*'   # push all note namespaces
+```
+
+**The fetch side — a silent failure most teams hit:**
+
+Pushing notes is only half the story. Git's default fetch refspec maps `refs/heads/*` to `refs/remotes/origin/*`. The `refs/notes/` namespace is not included. This means `git fetch origin` silently ignores all remote notes, forever, unless the refspec is explicitly extended:
+
+```bash
+# What git fetch does by default (from .git/config):
+[remote "origin"]
+    fetch = +refs/heads/*:refs/remotes/origin/*
+    # refs/notes/* is NOT here — notes are never fetched
+
+# Fix: add the notes refspec (run once per clone):
+git config --add remote.origin.fetch '+refs/notes/*:refs/notes/*'
+
+# .git/config now contains:
+[remote "origin"]
+    fetch = +refs/heads/*:refs/remotes/origin/*
+    fetch = +refs/notes/*:refs/notes/*
+```
+
+After this, `git fetch origin` also syncs all note namespaces. Without it, a teammate can push a bypass note and every other developer's clone will never see it — `git log --show-notes=bypasses` shows nothing, silently. The bypass audit trail is effectively invisible across the team.
+
+**install.sh gap:** This refspec configuration is not currently automated by install.sh. Teams using multi-developer bypass auditing must add it to their setup script or clone instructions:
+```bash
+# Add to install.sh after git config core.hooksPath:
+git config --add remote.origin.fetch '+refs/notes/*:refs/notes/*'
 ```
 
 **Notes can be seen on log:**
@@ -1535,6 +1601,56 @@ The `try: json.loads(val) / except: val` pattern handles both typed and string v
 - `_json_set file "key" "42"` → stores integer 42 (JSON parses "42" as an integer)
 - `_json_set file "key" '"hello"'` → stores string "hello" (the JSON string `"hello"`)
 - `_json_set file "key" "true"` → stores boolean true
+
+### Python Mechanics Deep-Dive: keys[:-1] and setdefault()
+
+A reader coming from six modules of bash will hit `keys[:-1]` and `obj.setdefault(k, {})` and find them opaque. Here is the full trace:
+
+**Python slice notation:**
+```python
+keys = "last_pass_sha.feature/billing".split('.')
+# → ["last_pass_sha", "feature/billing"]
+
+keys[:-1]   # all elements except the last → ["last_pass_sha"]
+keys[-1]    # last element only            → "feature/billing"
+keys[1:]    # all elements except first    → ["feature/billing"]
+```
+The slice `[:-1]` means "from the start up to but not including the last." In `_json_set`, we need to walk down to the parent dict before setting the final key. `keys[:-1]` gives us the path to traverse; `keys[-1]` is the key we actually assign to.
+
+**dict.setdefault(key, default):**
+```python
+d = {}
+obj = d
+obj = obj.setdefault("last_pass_sha", {})
+# → "last_pass_sha" not in d, so d["last_pass_sha"] = {} is inserted
+# → returns the new {}, which obj now points to
+obj["feature/billing"] = "abc123"
+# → d is now {"last_pass_sha": {"feature/billing": "abc123"}}
+```
+`setdefault` does two things in one call: if the key is absent it inserts `key: default` and returns `default`; if the key is present it returns the existing value without touching it. This means the loop is safe to call on a path that is partially or fully constructed — it never overwrites existing structure.
+
+**Full trace of `_json_set gate_state.json "last_pass_sha.feature/billing" '"abc123"'`:**
+```python
+# Step 1: parse JSON
+d = {"last_pass_sha": {}, "receipts": {}, ...}
+
+# Step 2: split path
+keys = ["last_pass_sha", "feature/billing"]
+
+# Step 3: descend all-but-last
+obj = d
+for k in ["last_pass_sha"]:       # keys[:-1]
+    obj = obj.setdefault(k, {})   # obj now points to d["last_pass_sha"] = {}
+
+# Step 4: assign at the final key
+val = '"abc123"'
+obj["feature/billing"] = json.loads('"abc123"')   # → Python str "abc123"
+
+# Step 5: d is now {"last_pass_sha": {"feature/billing": "abc123"}, ...}
+# Step 6: write entire dict back to file
+```
+
+**Why not just `d["a"]["b"] = val`?** Because it raises `KeyError` if `d["a"]` doesn't exist yet. `setdefault` handles missing intermediate levels without needing to pre-check their existence.
 
 ---
 
