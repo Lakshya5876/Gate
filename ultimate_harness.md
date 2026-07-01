@@ -3787,12 +3787,12 @@ jobs:
         with:
           python-version: "3.x"
 
-      - name: Verify governance files are present and unmodified by the PR
+      - name: Verify governance files are present, unmodified, and integrity-pinned
         run: |
           set -euo pipefail
-          test -f .githooks/gate.sh   || { echo "::error::.githooks/gate.sh missing"; exit 1; }
-          test -f .claude/gate_state.json || { echo "::error::.claude/gate_state.json missing"; exit 1; }
-          echo "Governance files present."
+          test -f .githooks/verify_governance_integrity.sh || { echo "::error::.githooks/verify_governance_integrity.sh missing — governance stripped"; exit 1; }
+          chmod +x .githooks/verify_governance_integrity.sh
+          bash .githooks/verify_governance_integrity.sh   # ← see Module A7 — shared with the bats suite
 
       - name: Run governance gate (mechanical — tests forced on in CI)
         env:
@@ -3820,7 +3820,9 @@ Locally, `pre-push` can exit early if a receipt exists for the committed tree (M
 
 **4. Governance file integrity step**
 
-The first job step checks that `.githooks/gate.sh` and `.claude/gate_state.json` are present. This prevents a PR that deletes or renames these files from silently disabling CI governance. If a PR removes `gate.sh`, CI fails loudly before the gate even runs.
+The first job step checks that `.githooks/verify_governance_integrity.sh` is present, then delegates to it. That script (`templates/verify_governance_integrity.sh`, deployed by `install.sh` alongside `gate.sh`) checks that `.githooks/gate.sh`, `.claude/gate_state.json`, and `.claude/gate_integrity.sha256` are all present, then verifies `gate.sh`'s live SHA-256 against the pinned hash — a content check, not just a presence check, since presence alone lets a PR weaken `gate.sh` and still pass CI (Module A6/A7). This prevents a PR that deletes, renames, or silently weakens these files from disabling CI governance. If a PR removes `gate.sh` or tampers with it, CI fails loudly before the gate even runs.
+
+The check logic lives in exactly one file, invoked identically by CI and by the bats test suite's `run_ci_integrity_check` helper (`tests/gate/test_helper.bash`) — not hand-duplicated in each place. A prior version duplicated the logic directly in the YAML and in a separate test helper; the duplication silently drifted out of sync after an edit to one copy, which an audit caught. Extracting a single shared script closes that class of drift permanently rather than requiring the two copies to be kept in sync by hand on every future change.
 
 ### Why CI Is the Backstop, Not the Primary Gate
 
@@ -4830,3 +4832,23 @@ Every fix in this addendum came from taking a critique seriously enough to verif
 ### Correction (same session): `run_ci_integrity_check` Test-Fidelity Gap
 
 A third-pass audit of commit `3cf0a8a` found that `run_ci_integrity_check()` in `test_helper.bash` — added by Fix 3 above — was not a faithful mirror of the real `templates/ci-gate.yml` logic it stands in for: it was missing the `test -f .claude/gate_state.json` presence assertion the real CI step performs, and carried a `shasum -a 256` macOS fallback the real CI script (which runs on `ubuntu-latest` only) doesn't have. Verified both discrepancies by reading the two files side by side rather than trusting the audit's description. Fixed by removing the extraneous fallback and adding the missing assertion, plus a new bats test (`CI integrity check blocks when .claude/gate_state.json is missing`) covering it — the same gap-class Fix 3 was meant to prevent, now closed for the mirror itself. Full suite: 24/24 passing.
+
+---
+
+## A8. Eliminating the CI/Test Duplication at the Root, Not Re-Syncing It (2026-07-02)
+
+*Changes made in the session after the A7 correction was committed, in response to a fourth-pass audit of commit `52cdbea`.*
+
+### The Finding
+
+The fourth-pass audit confirmed the A7 correction was real and complete, but raised a structural point about the fix's *shape*, not its correctness: `run_ci_integrity_check()` and `templates/ci-gate.yml`'s verification step were still two independently-maintained copies of the same logic. Re-syncing them a second time (as the A7 correction did) doesn't remove the underlying drift risk — nothing mechanically prevents a third divergence after the next edit to either copy.
+
+### The Fix — Extract, Don't Re-Sync
+
+Created `templates/verify_governance_integrity.sh`, containing the exact governance-file presence + content-hash check logic, as the single source of truth. `install.sh`'s `_write_hooks()` now deploys it to `.githooks/verify_governance_integrity.sh` alongside `gate.sh` (covering both the fresh-install and `--upgrade` paths automatically, since both call `_write_hooks()`). `templates/ci-gate.yml`'s verification step was reduced to a presence check plus `bash .githooks/verify_governance_integrity.sh`. `tests/gate/test_helper.bash`'s `run_ci_integrity_check()` was reduced to the same one-line invocation — it now runs the literal file CI runs, not a copy of its logic. There is no second copy left to drift.
+
+**A side-effect worth naming explicitly:** placing the new script under `.githooks/` was a deliberate choice, not an afterthought — that directory is already covered by the trust-root deny-list (`Write(.githooks/**)`/`Edit(.githooks/**)`, Module A6/A7) and by the Bash-guard hook's substring match on `.githooks/` (Module A7 Fix 2). The new file inherited both protections for free, with zero additional deny-list or hook changes required.
+
+**A related, explicitly out-of-scope gap surfaced during this work, not fixed here:** `.github/workflows/gate.yml` itself (the deployed CI workflow file) is not in the trust-root deny-list — an agent could still weaken the wrapper step that invokes `verify_governance_integrity.sh`, or delete the step entirely. This gap predates this fix (it applied equally to the old inline YAML logic) and is unrelated to the duplication problem this addendum closes; it is noted here rather than folded in, consistent with keeping each fix scoped to the finding that motivated it.
+
+Module 10.10 in this document was updated to match — it previously quoted the old inline YAML verbatim, which the refactor made stale. Full suite: 24/24 passing, now exercising the real shared artifact instead of a hand-copy of it.

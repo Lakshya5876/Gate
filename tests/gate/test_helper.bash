@@ -4,6 +4,7 @@
 FRAMEWORK_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 GATE_SH_SRC="${FRAMEWORK_ROOT}/templates/gate.sh"
 GATE_STATE_SRC="${FRAMEWORK_ROOT}/templates/gate_state.json"
+VERIFY_INTEGRITY_SRC="${FRAMEWORK_ROOT}/templates/verify_governance_integrity.sh"
 
 setup_gate_repo() {
     TEST_REPO="$(mktemp -d "${TMPDIR:-/tmp}/gate-test-XXXXXX")"
@@ -17,7 +18,8 @@ setup_gate_repo() {
     mkdir -p .githooks .claude
     cp "$GATE_SH_SRC" .githooks/gate.sh
     cp "$GATE_STATE_SRC" .claude/gate_state.json
-    chmod +x .githooks/gate.sh
+    cp "$VERIFY_INTEGRITY_SRC" .githooks/verify_governance_integrity.sh
+    chmod +x .githooks/gate.sh .githooks/verify_governance_integrity.sh
 
     git checkout -b feature/gate-test -q
     echo "# gate test repo" > README.md
@@ -39,23 +41,13 @@ run_gate() {
 }
 
 run_ci_integrity_check() {
-    # Mirrors the hash-verification block in templates/ci-gate.yml for
-    # isolated testing (same convention as run_pre_push_hook above — CI YAML
-    # isn't directly bats-testable, so the exact shell logic is duplicated).
-    # Caller must be inside TEST_REPO with .githooks/gate.sh already present.
-    env bash -c '
-set -euo pipefail
-test -f .githooks/gate.sh   || { echo "::error::.githooks/gate.sh missing — governance stripped"; exit 1; }
-test -f .claude/gate_state.json || { echo "::error::.claude/gate_state.json missing"; exit 1; }
-test -f .claude/gate_integrity.sha256 || { echo "::error::.claude/gate_integrity.sha256 missing — integrity pin stripped"; exit 1; }
-ACTUAL_HASH=$(sha256sum .githooks/gate.sh | awk "{print \$1}")
-EXPECTED_HASH=$(awk "{print \$1}" .claude/gate_integrity.sha256)
-if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
-    echo "::error::Deployed gate.sh content does not match the pinned integrity hash."
-    exit 1
-fi
-echo "Governance files present and integrity-verified."
-' 2>&1
+    # Invokes the exact same script CI runs (templates/verify_governance_integrity.sh,
+    # deployed to .githooks/ by setup_gate_repo) — no hand-duplicated logic to
+    # drift out of sync. A prior audit found the previous hand-mirrored copy
+    # had gone stale; extracting a single shared script closes that class of
+    # drift permanently rather than just re-syncing it once more.
+    # Caller must be inside TEST_REPO with .githooks/verify_governance_integrity.sh present.
+    bash .githooks/verify_governance_integrity.sh 2>&1
 }
 
 run_pre_push_hook() {

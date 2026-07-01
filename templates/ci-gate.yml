@@ -30,25 +30,9 @@ jobs:
       - name: Verify governance files are present, unmodified, and integrity-pinned
         run: |
           set -euo pipefail
-          test -f .githooks/gate.sh   || { echo "::error::.githooks/gate.sh missing — governance stripped"; exit 1; }
-          test -f .claude/gate_state.json || { echo "::error::.claude/gate_state.json missing"; exit 1; }
-          test -f .claude/gate_integrity.sha256 || { echo "::error::.claude/gate_integrity.sha256 missing — integrity pin stripped"; exit 1; }
-
-          # Content-hash check, not just presence: a PR can otherwise weaken
-          # gate.sh and still pass CI as long as the file exists. This is the
-          # actual security boundary — .claude/gate_integrity.sha256 must be
-          # blocked from casual agent edits (see the trust-root deny-list in
-          # .claude/settings.json) and ideally covered by CODEOWNERS + branch
-          # protection so only a human-reviewed PR can move the pinned hash.
-          ACTUAL_HASH=$(sha256sum .githooks/gate.sh | awk '{print $1}')
-          EXPECTED_HASH=$(awk '{print $1}' .claude/gate_integrity.sha256)
-          if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
-              echo "::error::Deployed gate.sh content does not match the pinned integrity hash." >&2
-              echo "::error::expected=${EXPECTED_HASH} actual=${ACTUAL_HASH}" >&2
-              echo "::error::If this change is legitimate, re-run install.sh --upgrade to regenerate the pin, then commit both files together under human review." >&2
-              exit 1
-          fi
-          echo "Governance files present and integrity-verified."
+          test -f .githooks/verify_governance_integrity.sh || { echo "::error::.githooks/verify_governance_integrity.sh missing — governance stripped"; exit 1; }
+          chmod +x .githooks/verify_governance_integrity.sh
+          bash .githooks/verify_governance_integrity.sh
 
       - name: Run governance gate (mechanical — tests forced on in CI)
         env:

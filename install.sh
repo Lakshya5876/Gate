@@ -59,6 +59,16 @@ _write_hooks() {
     _fetch "templates/gate.sh" ".githooks/gate.sh"
     chmod +x .githooks/gate.sh
 
+    # Single source of truth for the governance-file integrity check, invoked
+    # identically by CI (ci-gate.yml) and the bats test suite. Extracted out
+    # of ci-gate.yml specifically so the two can never drift out of sync with
+    # each other again (a prior audit found a hand-duplicated copy had gone
+    # stale). Lives under .githooks/ deliberately — it's already covered by
+    # the existing trust-root deny-list and Bash guard hook without any
+    # further changes to either.
+    _fetch "templates/verify_governance_integrity.sh" ".githooks/verify_governance_integrity.sh"
+    chmod +x .githooks/verify_governance_integrity.sh
+
     # Pin the CI integrity hash to whatever gate.sh was just deployed. This is
     # mandatory, not optional — regenerated on every fresh install AND every
     # --upgrade, so the content-hash check in .github/workflows/gate.yml never
@@ -418,6 +428,7 @@ PYEOF
     echo ""
     echo "What was updated:"
     echo "  ✓ .githooks/gate.sh"
+    echo "  ✓ .githooks/verify_governance_integrity.sh"
     echo "  ✓ .githooks/pre-commit"
     echo "  ✓ .githooks/pre-push"
     echo "  ✓ .claude/gate_integrity.sha256 (re-pinned to the new gate.sh)"
@@ -779,7 +790,7 @@ echo "What was installed:"
 echo "  ✓ Dev guide:      ${DEV_GUIDE_DST}"
 echo "  ✓ Init package:   ${INIT_PKG_DST}"
 echo "  ✓ Gate ledger:    .claude/gate_state.json"
-echo "  ✓ Git hooks:      .githooks/ (pre-commit, pre-push, gate.sh)"
+echo "  ✓ Git hooks:      .githooks/ (pre-commit, pre-push, gate.sh, verify_governance_integrity.sh)"
 echo "  ✓ Integrity pin:  .claude/gate_integrity.sha256 (CI verifies gate.sh content against this)"
 echo "  ✓ Trust-root deny: .claude/settings.json (permissions.deny + Bash guard hook — mechanical)"
 echo "  ✓ CI workflow:    .github/workflows/gate.yml (CI parity backstop)"
