@@ -4826,3 +4826,7 @@ Verified directly (not just read): built the scaffold in an isolated scratch dir
 ### What This Round Confirms About the Audit Loop
 
 Every fix in this addendum came from taking a critique seriously enough to verify it against the actual code rather than accepting either the finding or the first proposed remedy at face value — the audit's own suggested Bash-pattern remedy for Fix 2 was itself unsound once checked against how the permission matcher actually works, and Fix 1's naive implementation would have broken the very system it was meant to protect had it not been traced through step by step before shipping.
+
+### Correction (same session): `run_ci_integrity_check` Test-Fidelity Gap
+
+A third-pass audit of commit `3cf0a8a` found that `run_ci_integrity_check()` in `test_helper.bash` — added by Fix 3 above — was not a faithful mirror of the real `templates/ci-gate.yml` logic it stands in for: it was missing the `test -f .claude/gate_state.json` presence assertion the real CI step performs, and carried a `shasum -a 256` macOS fallback the real CI script (which runs on `ubuntu-latest` only) doesn't have. Verified both discrepancies by reading the two files side by side rather than trusting the audit's description. Fixed by removing the extraneous fallback and adding the missing assertion, plus a new bats test (`CI integrity check blocks when .claude/gate_state.json is missing`) covering it — the same gap-class Fix 3 was meant to prevent, now closed for the mirror itself. Full suite: 24/24 passing.

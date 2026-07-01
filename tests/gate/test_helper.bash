@@ -46,8 +46,9 @@ run_ci_integrity_check() {
     env bash -c '
 set -euo pipefail
 test -f .githooks/gate.sh   || { echo "::error::.githooks/gate.sh missing — governance stripped"; exit 1; }
+test -f .claude/gate_state.json || { echo "::error::.claude/gate_state.json missing"; exit 1; }
 test -f .claude/gate_integrity.sha256 || { echo "::error::.claude/gate_integrity.sha256 missing — integrity pin stripped"; exit 1; }
-ACTUAL_HASH=$(sha256sum .githooks/gate.sh 2>/dev/null | awk "{print \$1}" || shasum -a 256 .githooks/gate.sh | awk "{print \$1}")
+ACTUAL_HASH=$(sha256sum .githooks/gate.sh | awk "{print \$1}")
 EXPECTED_HASH=$(awk "{print \$1}" .claude/gate_integrity.sha256)
 if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
     echo "::error::Deployed gate.sh content does not match the pinned integrity hash."

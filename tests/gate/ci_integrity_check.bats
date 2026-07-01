@@ -36,3 +36,10 @@ teardown() {
     [ "$status" -eq 1 ]
     [[ "$output" == *"governance stripped"* ]]
 }
+
+@test "CI integrity check blocks when .claude/gate_state.json is missing" {
+    rm .claude/gate_state.json
+    run run_ci_integrity_check
+    [ "$status" -eq 1 ]
+    [[ "$output" == *".claude/gate_state.json missing"* ]]
+}
