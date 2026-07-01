@@ -1367,6 +1367,80 @@ Key detail (commit `630d3ad`): before spawning a new build, gate.sh checks if a 
 
 ---
 
+## 3.8.1 What the Graph Actually Contains — Nodes, Edges, and Tool Contracts
+
+Module 5.3 lists five MCP tool names and `max_hops` values without explaining what they operate on. This section fills that gap.
+
+### Nodes
+
+A node in the `code-review-graph` index is a **named symbol with a location** — a function, class, method, or top-level constant. Not a file. A file with 12 functions produces 12 function nodes plus 1 module node.
+
+```
+Node:
+  id:      "app/services/kpi_service.py::get_kpi_summary"
+  type:    function | class | method | module
+  file:    "app/services/kpi_service.py"
+  line:    42
+  domain:  "application_code"   ← one of included_domains
+```
+
+`node_count` in `gate_state.json` is the total node count after the last build. Watching this number across builds tells you how much of the codebase is indexed.
+
+### Edges
+
+An edge represents a typed dependency between two nodes:
+
+| Edge type | Meaning | Example |
+|-----------|---------|---------|
+| `calls` | Function A invokes function B | `kpi_service.get_kpi_summary → kpi_repository.fetch_kpi_rows` |
+| `imports` | Module A imports symbol B | `routes/kpis.py → services/kpi_service.KpiService` |
+| `inherits` | Class A subclasses class B | `AdminUser → BaseUser` |
+| `uses_sql` | Function A executes a migration/SQL file | `kpi_repository.fetch_kpi_rows → migrations/0012_add_billing_table.sql` |
+
+**The `included_domains` constraint:** Edge construction is restricted to nodes whose `domain` field is in `included_domains`. Omitting `"sql_migrations"` means `uses_sql` edges are never built — the impact of a schema change is invisible to the graph. This is why the default `included_domains` list includes all seven domain types.
+
+### max_hops — BFS Depth in the Dependency Graph
+
+When `get_impact_radius_tool` is called for a changed file, the graph server does a breadth-first traversal following edges outward from the changed symbols:
+
+```
+hop 0: the changed symbol
+hop 1: everything that directly calls/imports the changed symbol
+hop 2: everything that calls/imports those callers
+hop N: …
+```
+
+`max_hops: 1` (ULTRA-NARROW, hotfix): Only direct callers. Minimum blast-radius view for production emergencies.  
+`max_hops: 2` (NARROW, bugfix): Callers and their callers. Sufficient for targeted bug fixes.  
+`max_hops: null` (BROAD, feature): Full transitive closure. Architecture-level changes need the full picture.
+
+**Critical detail:** `max_hops` is enforced by the MCP server at query time, not by gate.sh and not by CLAUDE.md. The server reads `branch_strategy.<type>.max_hops` from `gate_state.json` and truncates the BFS at that depth before returning. The AI cannot "ask for deeper" — the server will not return it.
+
+### The Five MCP Tools and What They Are For
+
+**`get_architecture_overview_tool`** (BROAD only, required before first write)  
+Returns a structural summary of the entire codebase: all modules organized by domain, their top-level import/call relationships, and any detected cross-domain violations. This is the "zoom out" before starting a feature. BROAD branches set `architecture_overview_required: true`, which means the AI must call this tool before any write — enforced by the hook layer.
+
+**`semantic_search_nodes_tool`** (BROAD only)  
+Text search over symbol names and inline docstrings. Used when the AI knows what it is looking for ("billing history filter") but not which file or function implements it. Returns a ranked list of matching nodes.
+
+**`get_impact_radius_tool`** (all except DIFF-ONLY)  
+Given a file path (or set of files being changed), returns all nodes that transitively depend on any symbol in those files, up to `max_hops`. This is the primary tool Claude Code uses to determine whether a change is truly isolated or touches something critical — and therefore what tier of test coverage to require.
+
+**`query_graph_tool`** (BROAD + NARROW)  
+Arbitrary graph traversal filtered by edge type. Used for targeted questions: "what SQL migrations does this service file touch?", "what routes invoke this repository function?", "which modules in the `infrastructure` domain depend on this config constant?"
+
+**`get_review_context_tool`** (BROAD + DIFF-ONLY)  
+Diff-focused summary: what changed, what that change calls, what calls it. Used on release branches where code writes are forbidden but review is permitted. Gives the AI the dependency context for a PR without traversing the full graph.
+
+### Why `tools_permitted` Is Server-Side, Not Instruction-Side
+
+The MCP server returns a capability error for any tool call not in the branch's `tools_permitted` list. This is not a CLAUDE.md instruction ("please don't call X") — it is a hard server refusal. The AI cannot call `get_architecture_overview_tool` on a hotfix branch regardless of what it wants to do.
+
+This is the governance mechanism that makes branch strategies enforceable beyond developer trust: the AI's toolset is structurally narrowed by the branch it is working on.
+
+---
+
 ## 3.9 Full Data Flow Diagram: From `git commit` to Atoms on Disk
 
 ```
@@ -2444,6 +2518,27 @@ The `code_writes_permitted: false` on release is the only field gate.sh actually
 `last_build_timestamp` is read by STEP 3 to detect staleness (>7 days). It is written by the `code-review-graph build` process after a successful rebuild.
 
 `included_domains` tells the graph builder which parts of the codebase to index. A graph that only indexes `application_code` would miss the fact that a service function change affects a SQL migration — because migrations aren't indexed.
+
+---
+
+## 5.5.1 The execution_mode_log Field — Reserved Schema Slot
+
+```json
+{
+  "execution_mode_log": []
+}
+```
+
+This field appears in every `gate_state.json` scaffolded by install.sh. It is **not read or written by gate.sh v1.0**. The array will remain empty in your installation unless you extend the framework.
+
+**What it is reserved for:** The engineering guide (the implementation package for engineers) defines three execution modes that the AI declares at the start of every response:
+- `MUST OUTPUT` — a read-only recon pass with no side effects
+- `HARD STOP` — the AI has detected a condition requiring human approval before continuing
+- `EXECUTE` — a write pass that will modify files
+
+`execution_mode_log` is the schema slot for a future gate feature that would record which mode each agent session declared, making it auditable that the AI followed the declared mode for each run. The field is scaffolded now so a future gate version can start writing it without a schema migration.
+
+**Practical consequence:** If you are reading `gate_state.json` and see `"execution_mode_log": []`, this is correct. It is not a bug or an indication that something failed to run.
 
 ---
 
@@ -3661,6 +3756,84 @@ The `--tap` flag outputs in TAP format (Test Anything Protocol), which CI system
 
 ---
 
+## 10.10 CI Gate — gate.yml Walkthrough
+
+`framework-tests.yml` (Module 10.9) tests the bats suite on the *framework repo itself*. This section covers the different file — `templates/ci-gate.yml`, deployed by install.sh to `.github/workflows/gate.yml` in the *user's project repo*. These serve different purposes.
+
+```yaml
+# CI parity gate — deployed by install.sh to .github/workflows/gate.yml
+name: governance-gate
+
+on:
+  pull_request:
+    branches: [main, master, develop, "release/**", production]
+  push:
+    branches: [main, master, develop, "release/**", production]
+
+permissions:
+  contents: read        # read-only — gate never writes back to the repo
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history — gate needs diff range)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # ← required; see below
+
+      - name: Set up Python (gate.sh json helpers)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Verify governance files are present and unmodified by the PR
+        run: |
+          set -euo pipefail
+          test -f .githooks/gate.sh   || { echo "::error::.githooks/gate.sh missing"; exit 1; }
+          test -f .claude/gate_state.json || { echo "::error::.claude/gate_state.json missing"; exit 1; }
+          echo "Governance files present."
+
+      - name: Run governance gate (mechanical — tests forced on in CI)
+        env:
+          GATE_TRIGGER: ci          # ← puts gate.sh in CI mode
+          RUN_TESTS: "true"         # ← forces full test suite regardless of receipt
+        run: |
+          set -euo pipefail
+          chmod +x .githooks/gate.sh
+          bash .githooks/gate.sh
+```
+
+### Four CI-Specific Mechanics Worth Understanding
+
+**1. `fetch-depth: 0` — full history is required**
+
+By default, `actions/checkout@v4` does a shallow clone (depth 1). gate.sh's STEP 4 computes `git diff LAST_SHA..HEAD` to determine which files changed incrementally. With depth 1, commits before the current HEAD don't exist locally — `git diff` against a SHA not in the shallow history exits with an error. Full history (`fetch-depth: 0`) ensures every commit referenced in `gate_state.json` is available.
+
+**2. `GATE_TRIGGER=ci` — gate knows it's in CI**
+
+Gate.sh checks `$GATE_TRIGGER` in several places. The CI mode behaves like `pre-push` (full verification, not just incremental) but skips some hooks that are only meaningful locally (TTY prompts, process tree traversal for `_is_claude_agent_process`). In CI, all commits are treated as agent commits for gate-check purposes.
+
+**3. `RUN_TESTS=true` — the receipt fast path is disabled**
+
+Locally, `pre-push` can exit early if a receipt exists for the committed tree (Module 8). In CI, the receipt in `gate_state.json` cannot be trusted: the file is from the repo at checkout time, not from the developer's live session. `RUN_TESTS=true` bypasses the receipt check and forces the full test suite, coverage measurement, and complexity check on every CI run.
+
+**4. Governance file integrity step**
+
+The first job step checks that `.githooks/gate.sh` and `.claude/gate_state.json` are present. This prevents a PR that deletes or renames these files from silently disabling CI governance. If a PR removes `gate.sh`, CI fails loudly before the gate even runs.
+
+### Why CI Is the Backstop, Not the Primary Gate
+
+The local gate runs in under 90 seconds with receipt caching. CI takes 3–5 minutes (checkout + Python setup + full test suite). If CI were the primary gate, developers would wait minutes for feedback they could have gotten in seconds.
+
+The division of responsibility:
+- **Local gate** — developer feedback loop, fast, receipt-optimized
+- **CI gate** — authoritative backstop, catches bypassed commits, runs on pushes to protected branches, full test suite always on
+
+An attacker who bypasses the local gate (SKIP_GATE=1) still cannot merge to main without CI passing. CI admin access is required to disable CI — and that action is logged by GitHub at the organization level.
+
+---
+
 <a name="module-11"></a>
 # MODULE 11 — The v1 Release Packages
 
@@ -3720,13 +3893,71 @@ Install.sh automates everything EXCEPT one thing: writing `CLAUDE.md`.
 
 `CLAUDE.md` is the engineering constitution — the list of architectural rules, naming contracts, security invariants, and coding standards that are specific to this project. No automation can generate these because they are the accumulated wisdom of the team.
 
-The init prompt (in the engineering guide) is a structured set of questions that guides the tech lead through writing CLAUDE.md:
-- What are the layer boundaries in this project?
-- What naming conventions must be followed?
-- What security invariants are non-negotiable?
-- What constitutes a "core file" for Tier 3 escalation?
+### The Two-Phase Process
 
-The team writes CLAUDE.md once. It is then the permanent context the AI reads before every session.
+Writing CLAUDE.md is not a single AI prompt. It is a **two-phase process** designed so a human reviews the recon before the AI writes anything.
+
+**Phase 1 — Reconnaissance (read-only)**
+
+The tech lead runs the init prompt's Half 1 in a fresh Claude Code session with no prior context. The AI performs a read-only sweep of the project:
+
+- Reads the full directory tree
+- Reads all existing route, service, repository, and model files
+- Identifies the actual layer structure as it exists in code (not as assumed)
+- Finds all existing naming patterns (function names, class names, module names)
+- Identifies security-sensitive files (auth dependencies, credential readers, SQL queries)
+- Locates existing test files and the test runner configuration
+- Reads any existing CLAUDE.md, README, or ADR documents
+
+The AI outputs a structured **discovery report** — what it found, organized as:
+```
+LAYERS IDENTIFIED: ...
+NAMING PATTERNS: ...
+SECURITY-SENSITIVE FILES: ...
+TEST CONFIGURATION: ...
+AMBIGUITIES (things I cannot determine from code alone): ...
+```
+
+**The human review step:** The tech lead reads the discovery report and corrects any misidentified layers, missed invariants, or wrong naming patterns before proceeding. The AI cannot know what the team considers "non-negotiable" — only a human who has lived with the codebase can answer that.
+
+**Phase 2 — Generation**
+
+The tech lead runs the init prompt's Half 2, passing the corrected discovery report as context. The AI generates four files:
+
+1. **`CLAUDE.md`** — The engineering constitution. Sections:
+   - Architecture enforcement (layer definitions + what each layer must/must not do)
+   - Naming contracts (repository: fetch_*/find_*, service: get_*/calculate_*, etc.)
+   - Security invariants (credential handling, auth enforcement, SQL parameterisation)
+   - Dependency governance (approved packages, version pinning policy)
+   - Testing requirements (coverage threshold, mock policy, eval rules)
+   - Hard stops (changes requiring human approval)
+   - Default execution protocol (auto-pipeline behavior)
+
+2. **`.claude/settings.json`** — Hook registrations for this project:
+   - `PreToolUse` write guard (blocks writes to release branches)
+   - Any project-specific hook the tech lead requested during Phase 1 review
+
+3. **`.claude/baseline.json`** — Lint debt snapshot (brownfield only):
+   - Run the linter once against the full codebase
+   - Record existing findings as the baseline
+   - Future runs block only NEW findings (the ratchet)
+
+4. **`.githooks/gate.sh` configuration section** — The `LINT_CMD`, `TYPE_CMD`, `TEST_CMD`, and `COVERAGE_CMD` variables at the top of gate.sh, filled from the Phase 1 discovery of what tools this project actually uses.
+
+### Why Automation Cannot Replace This Step
+
+Automation could generate a CLAUDE.md that describes the code structure as-found. What it cannot generate:
+
+- **Rules that don't exist yet in code.** "Never call os.environ directly in routes" — if no route currently violates this, there's no code evidence for the rule.
+- **The severity hierarchy.** Which violations block immediately vs warn vs are deferred. This is a judgment call about risk tolerance.
+- **Business-context security invariants.** "The SESSION_TOKEN is never logged" — this requires knowing that SESSION_TOKEN is sensitive, which requires understanding the product.
+- **What constitutes a "core file" for Tier 3 escalation.** `auth.py` is obvious. But is `config.py`? Is the ORM base model? These are team decisions.
+
+The init prompt exists precisely at the boundary where code analysis ends and human knowledge begins.
+
+### The CLAUDE.md Hash as Continuity Guarantee
+
+After CLAUDE.md is written, `_verify_context_anchoring` (Module 4.7) stores its SHA-256 hash in `gate_state.json`. Every subsequent gate run checks whether CLAUDE.md has changed. If it has, the AI is warned to re-read the constitution before continuing. This closes the loop: the init prompt creates the constitution; the hash check ensures the AI stays aligned to it as it evolves.
 
 ---
 
@@ -4494,3 +4725,35 @@ fi
 ---
 
 *ultimate_harness.md is a living document. Addenda are appended as bugs are found and fixes are shipped.*
+
+---
+
+## A5. Post-Completion Gap Fill — Four Missing Sections (2026-07-01)
+
+*Changes made in the session after A4 was committed.*
+
+A completeness review of the curriculum (conducted after all prior addenda were merged) identified four gaps where a learner could not implement or reason about the system from the curriculum alone. All four were inserted inline at the appropriate modules in the same session.
+
+### Gap A — MCP Graph Internals (inserted as § 3.8.1)
+
+**What was missing:** Module 3.8 said `code-review-graph` "builds a graph of modules, their relationships, and their impact radii" without ever defining what a node or edge is. Module 5.3 listed five MCP tool names and `max_hops` values — which are meaningless without knowing what the graph traversal operates on.
+
+**What was added (§ 3.8.1):** Definition of nodes (named symbols with file+line, not files), edge types (calls/imports/inherits/uses_sql), BFS hop mechanics (hop 0 = changed symbol, hop N = Nth-degree dependents), per-tool descriptions (what each of the 5 tools is for), and the enforcement model (server-side capability restriction, not CLAUDE.md instruction).
+
+### Gap B — Init Prompt Two-Phase Flow (expanded § 11.4)
+
+**What was missing:** Module 11.4 was 7 lines saying "a structured set of questions." A learner finishing the curriculum could not write a CLAUDE.md from scratch, which means they could not deploy the system.
+
+**What was added (§ 11.4):** The two-phase process in full: Phase 1 (read-only recon → discovery report for human review), Phase 2 (generation of CLAUDE.md + settings.json + baseline.json + gate.sh config section from the corrected report), the actual content of each generated file, and the rationale for why automation cannot replace the human review step (rules that don't exist in code yet, severity hierarchies, business-context security invariants, core-file escalation decisions).
+
+### Gap C — CI Gate YAML Walkthrough (inserted as § 10.10)
+
+**What was missing:** `templates/ci-gate.yml` was referenced 5 times in the curriculum as "the authoritative backstop" but its YAML was never shown and its CI-specific mechanics were never explained.
+
+**What was added (§ 10.10):** Full annotated YAML, four CI-specific mechanics with explanation (`fetch-depth: 0` for full history, `GATE_TRIGGER=ci`, `RUN_TESTS=true` disabling the receipt fast path, governance file integrity check), and the division of responsibility between local gate (fast, receipt-optimized feedback loop) and CI gate (authoritative backstop for protected branches).
+
+### Gap D — `execution_mode_log` Field (inserted as § 5.5.1)
+
+**What was missing:** `gate_state.json` contains `"execution_mode_log": []` which is never read or written by gate.sh v1.0. A learner reading the schema with no documentation for this field would assume it was a bug or a failed run.
+
+**What was added (§ 5.5.1):** The field is a reserved schema slot for a future feature that would audit which execution mode (MUST OUTPUT / HARD STOP / EXECUTE) each agent session declared. An empty array is the correct state in v1.0 installations. The section explains why the slot is scaffolded now (forward-compatibility, avoids schema migration when the feature ships).
