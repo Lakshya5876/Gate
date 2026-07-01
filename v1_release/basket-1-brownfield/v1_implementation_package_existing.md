@@ -406,7 +406,12 @@ questions)
         editing the files that constrain it): "Write(.githooks/**)",
         "Edit(.githooks/**)", "Write(.claude/settings.json)",
         "Edit(.claude/settings.json)", "Write(.claude/baseline.json)",
-        "Edit(.claude/baseline.json)", "Write(CLAUDE.md)", "Edit(CLAUDE.md)",
+        "Edit(.claude/baseline.json)", "Write(.claude/gate_integrity.sha256)",
+        "Edit(.claude/gate_integrity.sha256)" — without this, an agent that
+        weakens .githooks/gate.sh can simply regenerate the pinned hash to
+        match in the same turn, and the CI content-check added in Module A6
+        verifies nothing; only a human-authored PR may move this pin,
+        "Write(CLAUDE.md)", "Edit(CLAUDE.md)",
         "Write(v1_claude_code_development_guide_existing.md)",
         "Edit(v1_claude_code_development_guide_existing.md)",
         "Write(v1_implementation_package_existing.md)",
@@ -566,7 +571,7 @@ questions.
 1. Review the generated CLAUDE.md once, end to end. It governs everything.
 2. Verify hooks are active: `git config core.hooksPath` must print `.githooks`.
 3. Commit the governance files on your setup branch:
-   `git add CLAUDE.md .claude/settings.json .claude/baseline.json .claude/commands/ .githooks/ quarantine.txt .team_aliases .gitignore`
+   `git add CLAUDE.md .claude/settings.json .claude/baseline.json .claude/gate_integrity.sha256 .claude/commands/ .githooks/ quarantine.txt .team_aliases .gitignore`
    `git commit -m "chore(claude): initialize agentic engineering environment"`
    (The pre-commit hook fires on this very commit — that's the system working.)
 4. Open a PR — your team should see and approve the constitution like any code.

@@ -14,7 +14,7 @@ This document describes what the framework touches, what it never reads, and how
 | `.claude/gate_state.json` | `gate.sh`, `install.sh` | Token budget, coverage thresholds, receipts, core_files |
 | `.claude/baseline.json` | `gate.sh` | Identity-based lint debt ratchet |
 | `refs/notes/bypasses` | `pre-push` hook | Bypass clock enforcement |
-| `~/.claude/org_policy.json` | `gate.sh` | Org-level token ceiling |
+| `~/.claude/org_policy.json` | `gate.sh` | Per-developer token budget ceiling (local file, not centrally enforced — see §6, CC6.6) |
 
 ### What the framework writes
 
@@ -111,7 +111,7 @@ Every gate bypass is cryptographically linked to the git history.
 | SOC 2 Control | Framework mechanism |
 |---------------|---------------------|
 | CC6.1 — Logical access controls | Every Claude Code action gated by `pre-commit`/`pre-push`; no route around gate without audited bypass |
-| CC6.6 — Restrict logical access to system boundaries | Token budget ceiling enforced at org level (`~/.claude/org_policy.json`); repo cannot exceed org ceiling |
+| CC6.6 — Restrict logical access to system boundaries | **Partial control — see caveat below.** Token budget ceiling read from `~/.claude/org_policy.json`, which is a local, per-developer-machine file, not a centrally distributed or tamper-evident policy. `gate.sh` enforces whatever value is present on that machine at gate time; it does not verify the value against an org-issued source of truth, and a developer with shell access can edit their own copy to raise or remove their ceiling. This mechanism deters accidental/unbounded spend (e.g. a runaway agent loop) on a cooperating machine; it is not a control that prevents a developer from unilaterally raising their own limit, and should not be represented to an auditor as centrally enforced without a companion mechanism (e.g. a signed policy file, or a CI/telemetry check that flags local overrides). |
 | CC6.8 — Prevent unauthorized changes | Protected branch guard in `pre-push` blocks direct pushes to main/master/develop/production/release/* |
 | CC7.2 — Monitor system components | `gate_state.json` token audit log + bypass notes provide a time-stamped record of every gate interaction |
 | CC8.1 — Change management | Layer boundary scanner (STEP 6.5) blocks architecture violations at commit time, not code review time |

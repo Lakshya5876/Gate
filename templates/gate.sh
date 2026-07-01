@@ -680,6 +680,17 @@ if [ ${#TEST_RUNNERS[@]} -gt 0 ]; then
     echo "GATE: inferred test runners (${#TEST_RUNNERS[@]}): ${TEST_RUNNERS[*]}" >&2
 fi
 
+# Fail closed, not silently, when source was changed but no test command was
+# found — neither explicit (TEST_CMD/FRONTEND_TEST_CMD) nor inferred. Scoped
+# to $HAS_BACKEND/$HAS_FRONTEND (same classification every other check below
+# already uses) so docs-only/config-only commits with no source changes are
+# never blocked — only a genuinely untested source change is.
+if ( $HAS_BACKEND || $HAS_FRONTEND ) && [ ${#TEST_RUNNERS[@]} -eq 0 ]; then
+    echo -e "${RED}PRE-COMMIT BLOCK: source files changed but no test runner was found (neither TEST_CMD/FRONTEND_TEST_CMD nor auto-inference matched).${RESET}" >&2
+    echo "Fix: configure TEST_CMD (or FRONTEND_TEST_CMD) in .claude/gate_state.json for this stack, or this commit cannot pass." >&2
+    exit 1
+fi
+
 if [ -z "$LINT_CMD" ]; then
     # Scope linting to changed files
     LINT_CHANGED=$(echo "$CHANGED_FILES" | grep -E '\.(py)$' | tr '\n' ' ' || true)
