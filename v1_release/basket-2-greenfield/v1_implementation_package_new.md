@@ -500,9 +500,33 @@ PHASE C — VERIFICATION AND MANIFEST
    (`git add -A` is acceptable ONLY for this birth commit — the constitution
    you just installed bans it from here on. The pre-commit hook fires on this
    very commit — that's the system working.)
-4. Activate aliases: `source .team_aliases`, then lock in:
+4. **Configure CODEOWNERS + branch protection — do this now, not later.** The
+   trust-root deny-list (`.claude/settings.json`) and the Bash-guard hook
+   stop Claude Code from tampering with the enforcement chain, but neither
+   stops a human contributor — or an agent operating outside Claude Code
+   entirely, e.g. through a bare `git commit` in a terminal — from editing
+   `.claude/gate_integrity.sha256` and `.githooks/gate.sh` together in the
+   same PR and having CI pass, since CI only verifies internal
+   self-consistency, not consistency against an externally-trusted
+   reference. Closing that gap requires a human control GitHub itself
+   enforces, not something `install.sh` can configure for you. Create
+   `.github/CODEOWNERS` at the repo root:
+   ```
+   /.githooks/                         @your-org/platform-team
+   /.claude/gate_integrity.sha256      @your-org/platform-team
+   /.claude/hooks/                     @your-org/platform-team
+   /.claude/settings.json              @your-org/platform-team
+   /.github/workflows/gate.yml         @your-org/platform-team
+   /CLAUDE.md                          @your-org/platform-team
+   ```
+   Then, in the repo's Settings → Branches → branch protection rule for your
+   default branch: enable "Require a pull request before merging" and
+   "Require review from Code Owners." Without this second step, CODEOWNERS
+   is purely advisory — GitHub does not enforce it unless a branch
+   protection rule says to.
+5. Activate aliases: `source .team_aliases`, then lock in:
    `echo "source $(pwd)/.team_aliases" >> ~/.zshrc`
-5. Every teammate, after cloning: `cc-init-hooks` (one time).
+6. Every teammate, after cloning: `cc-init-hooks` (one time).
 
 ## STEP 4 — DAILY WORKFLOW (from now on)
 
