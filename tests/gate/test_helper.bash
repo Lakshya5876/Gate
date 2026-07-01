@@ -38,6 +38,25 @@ run_gate() {
     env "$@" GATE_STATE=".claude/gate_state.json" bash .githooks/gate.sh 2>&1
 }
 
+run_ci_integrity_check() {
+    # Mirrors the hash-verification block in templates/ci-gate.yml for
+    # isolated testing (same convention as run_pre_push_hook above — CI YAML
+    # isn't directly bats-testable, so the exact shell logic is duplicated).
+    # Caller must be inside TEST_REPO with .githooks/gate.sh already present.
+    env bash -c '
+set -euo pipefail
+test -f .githooks/gate.sh   || { echo "::error::.githooks/gate.sh missing — governance stripped"; exit 1; }
+test -f .claude/gate_integrity.sha256 || { echo "::error::.claude/gate_integrity.sha256 missing — integrity pin stripped"; exit 1; }
+ACTUAL_HASH=$(sha256sum .githooks/gate.sh 2>/dev/null | awk "{print \$1}" || shasum -a 256 .githooks/gate.sh | awk "{print \$1}")
+EXPECTED_HASH=$(awk "{print \$1}" .claude/gate_integrity.sha256)
+if [ "$ACTUAL_HASH" != "$EXPECTED_HASH" ]; then
+    echo "::error::Deployed gate.sh content does not match the pinned integrity hash."
+    exit 1
+fi
+echo "Governance files present and integrity-verified."
+' 2>&1
+}
+
 run_pre_push_hook() {
     # Minimal pre-push bypass-clock logic mirrored from install.sh (for isolated testing).
     # 2>&1: messages go to stderr; redirect so bats `run` captures them in $output.

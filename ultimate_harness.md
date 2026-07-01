@@ -4792,3 +4792,37 @@ Four insertions, mirrored across both the brownfield and greenfield baskets (six
 ### Why Not a Verbatim Copy
 
 The source repo's CLAUDE.md was not copied in as a bolt-on file. It has no enforcement mechanism behind it — pure text, no gate. ai-dev-workflow already has Phase 2/4 checkpoints and a mechanical verification loop; threading the four principles into those existing gates (rather than adding an unenforced parallel document) means the additions inherit the same checkpoint-write and pre-push mechanics that already govern everything else the guide specifies.
+
+---
+
+## A7. Closing the Residual Governance Gaps From a Second Self-Audit (2026-07-02)
+
+*Changes made in the session after A6 was committed, in response to a re-audit of commit `1cc9f43`.*
+
+### Context
+
+A6's own security fixes (the CI hash-pin, Fix #2's fail-closed test-runner check) were themselves independently re-audited. The re-audit confirmed both fixes worked as intended and raised the framework's own self-assessed enterprise score from 6.9 to 7.4/10, but found three residual gaps: the new trust-root protection for `.claude/gate_integrity.sha256` was **advisory** (a guide instruction a human might forget to transcribe) rather than **mechanical**; even where followed, the protection only covered the Write/Edit tool interface, not equivalent Bash-level file writes (redirection, `tee`, `sed -i`); and neither of A6's own fixes shipped with a regression test.
+
+### Fix 1 — Mechanical Trust-Root Scaffolding (`install.sh`)
+
+Added `_write_trust_root_settings()` to `install.sh`, called from both the fresh-install flow and `_upgrade()` (with basket auto-detection for upgrade, since `DEV_GUIDE_DST`/`INIT_PKG_DST` aren't set in that flow). It scaffolds `.claude/settings.json` with the universal, repo-independent `permissions.deny` entries mechanically — no longer left to a human correctly transcribing them from a markdown guide during the init prompt. Idempotent: re-running merges in anything missing without disturbing existing customizations (verified by test — see below).
+
+**A real bug caught and fixed during implementation, not after:** the first version of this fix denied `Write(CLAUDE.md)`, `Write(.claude/baseline.json)`, and `Write(.claude/settings.json)` itself from install time onward. Tracing through what the init prompt's Phase C actually needs to do — create CLAUDE.md, create baseline.json, and edit settings.json to add its own allow-list — made it obvious this would have made it impossible for the init prompt to ever complete. The original design's `CRITICAL EXECUTION ORDER: write settings.json LAST` existed precisely to allow those three files to be created before the file that locks them is written. The fix: install.sh now only mechanizes the entries that are safe to lock immediately (`.githooks/**`, `.claude/gate_integrity.sha256`, the dev-guide/init-package filenames, and all the generic Bash command-pattern denials — force-push, hook-evasion, `SKIP_GATE`, credential reads, DDL, `rm -rf`). The three self-referential/content-generation entries (`.claude/settings.json`, `CLAUDE.md`, `.claude/baseline.json`) remain the init prompt's job, added as its **final** edit — preserving the original write-once-lock guarantee exactly, just scoped to three entries instead of the whole file. Both implementation packages' §C2/§B3 and the `CRITICAL EXECUTION ORDER` prose were updated to describe this split precisely.
+
+### Fix 2 — Semantic Bash Guard, Not More Deny-List Strings (`.claude/hooks/pre_bash_trust_root_guard.sh`)
+
+The re-audit's own suggested remedy — "add Bash-equivalent deny patterns, mirroring the existing credential-read section's Bash-cat coverage" — turned out not to be achievable. Claude Code's native `Bash(...)` permission matching is **prefix-only** (`Bash(git *)` matches commands *starting with* `git`); it cannot express "the command mentions this path anywhere," which is what's needed to catch `sha256sum gate.sh > .claude/gate_integrity.sha256` or `sed -i ... .githooks/gate.sh`. A static deny-list, no matter how many strings are added, structurally cannot close this — including the pre-existing "Bash cat pattern" note for credential reads, which has the identical unstated limitation.
+
+The actual fix is a new `PreToolUse` hook on the `Bash` matcher, `.claude/hooks/pre_bash_trust_root_guard.sh`, that inspects the literal command text for mentions of the protected paths and blocks regardless of shell construct. This mirrors the pattern this repo already uses for itself (`.claude/hooks/pre_tool_write_guard.sh`, a `Write|Edit|MultiEdit`-matcher hook that gates on branch), extended to a new tool matcher rather than more prefix strings. Its protected-path set deliberately excludes `.claude/settings.json`, `CLAUDE.md`, and `.claude/baseline.json` — the same three files excluded from Fix 1's early lock, for the same reason: the init prompt legitimately needs to reference them via Bash/python during its own generation and merge steps, and a blanket Bash-mention block would prevent that.
+
+Verified directly (not just read): built the scaffold in an isolated scratch directory, confirmed valid JSON output, confirmed the hook script's own syntax, and ran the exact bypass command from the prior audit's P2 finding (`sha256sum .githooks/gate.sh > .claude/gate_integrity.sha256`) against it — blocked. Also verified the merge branch preserves a hand-added allow-list and self-lock entries across a second run without duplicating the hook wiring.
+
+### Fix 3 — Two New bats Regression Tests
+
+`tests/gate/ci_integrity_check.bats` (4 tests) exercises the hash-verification logic from `templates/ci-gate.yml` — that logic lives inside a GitHub Actions YAML step, not in `gate.sh` itself, so it isn't directly bats-testable; a new `run_ci_integrity_check` helper in `test_helper.bash` mirrors it for isolated testing, following the exact convention `run_pre_push_hook` already established for the same reason. `tests/gate/test_runner_failclosed.bats` (3 tests) exercises Fix #2's actual `gate.sh` logic directly.
+
+**Running the full suite surfaced a real regression before it shipped:** adding the fail-closed check moved a new blocking point earlier in `gate.sh`'s pipeline than four pre-existing tests expected. `layer_boundary_block.bats`'s two tests and `baseline_ratchet.bats`'s two tests all stage a backend `.py` file without setting `TEST_CMD` — previously harmless, since nothing checked for a missing test runner. With Fix #2 in place, all four now hit the new fail-closed block *before* ever reaching the layer-boundary scan or the lint-ratchet check they were actually testing, and failed for the wrong reason. Fixed by adding `TEST_CMD='true'` to all four, matching the neutralization pattern `core_files_tier3.bats` already used. Full suite: 23/23 passing, including all 7 new tests.
+
+### What This Round Confirms About the Audit Loop
+
+Every fix in this addendum came from taking a critique seriously enough to verify it against the actual code rather than accepting either the finding or the first proposed remedy at face value — the audit's own suggested Bash-pattern remedy for Fix 2 was itself unsound once checked against how the permission matcher actually works, and Fix 1's naive implementation would have broken the very system it was meant to protect had it not been traced through step by step before shipping.

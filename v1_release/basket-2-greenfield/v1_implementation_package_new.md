@@ -216,12 +216,20 @@ Wait for my answer. Everything after this runs without questions.
 
 PHASE B — SCAFFOLD DEPLOYMENT (write everything)
 
-  CRITICAL EXECUTION ORDER: Write .claude/settings.json LAST in Phase B, only
-  after all other governance files (CLAUDE.md, .githooks/, quarantine.txt) have
-  been fully written to disk. Once settings.json is written, these files are
-  completely agent-immutable by design. Re-running initialization or repairing
-  these files is a human-only action (hand-edit + PR); the agent cannot
-  self-repair.
+  CRITICAL EXECUTION ORDER: .claude/settings.json already exists — install.sh
+  scaffolded it with the universal, repo-independent deny-list before this
+  prompt ever ran (see §B3 below). That scaffold deliberately excludes
+  Write/Edit denial on .claude/settings.json itself and CLAUDE.md, because
+  neither exists yet and you need to create them. Your LAST edit in Phase B —
+  after CLAUDE.md, .githooks/ contents, and quarantine.txt are all fully
+  written to disk — must ADD exactly these two self-lock pairs to the existing
+  permissions.deny array: "Write(.claude/settings.json)",
+  "Edit(.claude/settings.json)", "Write(CLAUDE.md)", "Edit(CLAUDE.md)". Once
+  that edit lands, these files are completely agent-immutable by design — the
+  same "write-once lock" guarantee the original design had, just now scoped to
+  two entries instead of the whole file. Re-running initialization or
+  repairing these files is a human-only action (hand-edit + PR); the agent
+  cannot self-repair.
 
   B1. Directory scaffold per Guide §2.1:
       src/domain/, src/application/, src/infrastructure/, src/presentation/,
@@ -269,12 +277,24 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         settings, hooks, and baseline change ONLY via human-authored PR, never
         via agent edit; the agent never self-maintains the constitution
 
-  B3. [DEFERRED — written LAST per CRITICAL EXECUTION ORDER above]
-      .claude/settings.json per Guide §2.3:
-      - "defaultMode": "default" pinned at the top of permissions
+  B3. .claude/settings.json per Guide §2.3 — MERGE, do not regenerate.
+      install.sh already scaffolded this file at install time via
+      `_write_trust_root_settings` (universal, repo-independent deny-list + a
+      Bash-matcher PreToolUse hook at `.claude/hooks/pre_bash_trust_root_guard.sh`
+      that inspects the actual Bash command text for trust-root paths — closes
+      the gap a static prefix-matched deny-list cannot: it can express "starts
+      with X," never "mentions path Y anywhere," so redirection/tee/sed -i/
+      python writes to a protected file aren't catchable by deny-list strings
+      alone). Verify the scaffold is present (`permissions.deny` non-empty,
+      `hooks.PreToolUse` contains the Bash-matcher entry) before adding
+      anything — if missing, re-run install.sh rather than hand-authoring the
+      deny-list. Your only job here is to ADD:
+      - "defaultMode": "default" (already present — do not remove it)
       - Allow: read-only commands + this stack's exact test/lint/typecheck/
         build commands + git add/commit/diff/status/log/update-index
-      - Deny: git reset --hard, git rebase, git clean, rm -rf, sudo, raw DDL,
+      - The reference deny-list below is what install.sh already wrote —
+        listed here so you can verify it's intact, not so you re-type it:
+        git reset --hard, git rebase, git clean, rm -rf, sudo, raw DDL,
         nc/ssh/scp, ALL force-push variants ("git push --force",
         "git push -f", "git push --force-with-lease", "git push --mirror",
         "git push --delete"),
@@ -289,16 +309,13 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         "Read(.env)", "Read(**/.env)", "Read(**/.env.*)", "Read(**/*.pem)",
         "Read(**/id_rsa*)", "Read(**/.aws/credentials)" plus equivalent
         Bash cat patterns,
-        and TRUST-ROOT writes (the agent must be mechanically blocked from
-        editing the files that constrain it): "Write(.githooks/**)",
-        "Edit(.githooks/**)", "Write(.claude/settings.json)",
-        "Edit(.claude/settings.json)", "Write(.claude/baseline.json)",
-        "Edit(.claude/baseline.json)", "Write(.claude/gate_integrity.sha256)",
+        and TRUST-ROOT writes for the files install.sh itself owns (never
+        agent-generated, so safe to lock from install time): "Write(.githooks/**)",
+        "Edit(.githooks/**)", "Write(.claude/gate_integrity.sha256)",
         "Edit(.claude/gate_integrity.sha256)" — without this, an agent that
         weakens .githooks/gate.sh can simply regenerate the pinned hash to
         match in the same turn, and the CI content-check added in Module A6
         verifies nothing; only a human-authored PR may move this pin,
-        "Write(CLAUDE.md)", "Edit(CLAUDE.md)",
         "Write(v1_claude_code_development_guide_new.md)",
         "Edit(v1_claude_code_development_guide_new.md)",
         "Write(v1_implementation_package_new.md)",
@@ -310,6 +327,18 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         "Bash(git commit -am*)", "Bash(git commit --amend*)" — the persistent
         git config form disables hooks for the whole clone, and -a/-am/--amend
         break the index-equals-commit-tree guarantee the gate relies on
+      - NOT in this install-time scaffold, by design: "Write(.claude/settings.json)",
+        "Edit(.claude/settings.json)", "Write(CLAUDE.md)", "Edit(CLAUDE.md)" —
+        neither file exists yet at install time and you need to create them.
+        Add these four entries as your LAST edit in Phase B, per the CRITICAL
+        EXECUTION ORDER note above — never before CLAUDE.md and settings.json's
+        own allow-list are fully written
+      - The Bash-matcher guard hook (`.claude/hooks/pre_bash_trust_root_guard.sh`)
+        deliberately protects only .githooks/, gate_integrity.sha256, and the
+        dev-guide/init-package filenames — NOT CLAUDE.md/settings.json, since
+        you legitimately need to reference those via Bash/python during this
+        very phase (reading current state, merging JSON). Do not add them to
+        that hook's protected-paths array.
       - git push in NEITHER list (it must prompt interactively)
 
   B4. .claude/commands/ — four files with this stack's real commands in every

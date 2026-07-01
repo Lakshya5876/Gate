@@ -203,6 +203,168 @@ PREPUSH
     git config core.hooksPath .githooks
 }
 
+_write_trust_root_settings() {
+    # Scaffold .claude/settings.json (permissions.deny) + the Bash trust-root
+    # guard hook. Both are universal — identical across every consumer repo,
+    # no repo-specific discovery needed — so this is mechanized here rather
+    # than left to the init prompt to transcribe by hand from the
+    # implementation-package guide. Called from the fresh-install flow and
+    # from _upgrade() (which backfills it for repos installed before this
+    # existed). Repo-specific allow-list entries remain the init prompt's job.
+    local dev_guide_dst="$1" init_pkg_dst="$2"
+    mkdir -p .claude/hooks
+
+    cat > .claude/hooks/pre_bash_trust_root_guard.sh << HOOKEOF
+#!/usr/bin/env bash
+# PreToolUse guard (Bash matcher) — blocks any Bash command that references a
+# trust-root governance path, regardless of shell construct (redirection, tee,
+# sed -i, python, etc.). Native permissions.deny is prefix-matched only and
+# cannot express "the command mentions this path anywhere" — a static deny
+# list can never fully close that gap, so this hook inspects the actual
+# command text instead. Receives tool input JSON on stdin.
+set -euo pipefail
+
+CMD=\$(python3 -c "import json,sys; print(json.load(sys.stdin).get('tool_input', {}).get('command', ''))" 2>/dev/null || echo "")
+[ -z "\$CMD" ] && exit 0
+
+PROTECTED_PATHS=(
+    ".githooks/"
+    ".claude/gate_integrity.sha256"
+    "${dev_guide_dst}"
+    "${init_pkg_dst}"
+)
+# Deliberately excludes .claude/settings.json, CLAUDE.md, and
+# .claude/baseline.json: the init prompt legitimately needs to reference
+# these via Bash/python during its own generation and merge steps (reading
+# current state, programmatic JSON edits). Blocking all mentions of them here
+# would block the init prompt from ever doing its job. Those three get their
+# write/edit protection from permissions.deny instead, added as the init
+# prompt's FINAL step — see the "MERGE, do not regenerate" note in the
+# implementation package.
+
+for _p in "\${PROTECTED_PATHS[@]}"; do
+    if [[ "\$CMD" == *"\$_p"* ]]; then
+        printf 'GATE: Bash commands referencing trust-root path '\''%s'\'' are blocked — these files constrain the agent and may only be changed via human-authored PR.\n' "\$_p" >&2
+        exit 1
+    fi
+done
+exit 0
+HOOKEOF
+    chmod +x .claude/hooks/pre_bash_trust_root_guard.sh
+
+    if [ ! -f ".claude/settings.json" ]; then
+        cat > .claude/settings.json << SETTINGSEOF
+{
+  "permissions": {
+    "defaultMode": "default",
+    "deny": [
+      "Bash(git reset --hard*)", "Bash(git rebase*)", "Bash(git clean*)",
+      "Bash(rm -rf*)", "Bash(sudo*)",
+      "Bash(DROP *)", "Bash(TRUNCATE *)", "Bash(DELETE FROM *)",
+      "Bash(nc *)", "Bash(ssh *)", "Bash(scp *)",
+      "Bash(git push --force*)", "Bash(git push -f*)",
+      "Bash(git push --force-with-lease*)", "Bash(git push --mirror*)",
+      "Bash(git push --delete*)",
+      "Bash(git commit --no-verify*)", "Bash(git commit -n *)",
+      "Bash(git push --no-verify*)", "Bash(git -c core.hooksPath*)",
+      "Bash(SKIP_GATE=*)",
+      "Read(.env)", "Read(**/.env)", "Read(**/.env.*)", "Read(**/*.pem)",
+      "Read(**/id_rsa*)", "Read(**/.aws/credentials)",
+      "Bash(cat .env*)", "Bash(cat **/.env*)", "Bash(cat **/*.pem*)",
+      "Bash(cat **/id_rsa*)", "Bash(cat **/.aws/credentials*)",
+      "Write(.githooks/**)", "Edit(.githooks/**)",
+      "Write(.claude/gate_integrity.sha256)", "Edit(.claude/gate_integrity.sha256)",
+      "Write(${dev_guide_dst})", "Edit(${dev_guide_dst})",
+      "Write(${init_pkg_dst})", "Edit(${init_pkg_dst})",
+      "Bash(git notes*remove*)", "Bash(git update-ref -d*)",
+      "Bash(git config core.hooksPath*)", "Bash(git config --add core.hooksPath*)",
+      "Bash(git commit -a*)", "Bash(git commit -am*)", "Bash(git commit --amend*)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "bash .claude/hooks/pre_bash_trust_root_guard.sh" }
+        ]
+      }
+    ]
+  }
+}
+SETTINGSEOF
+        # Deliberately NOT denying Write/Edit on .claude/settings.json,
+        # CLAUDE.md, or .claude/baseline.json here — those files don't exist
+        # yet and the init prompt must be able to create them. The init
+        # prompt's Phase C adds those three self-lock entries as its FINAL
+        # edit, preserving the original "write settings.json last" guarantee.
+        _success ".claude/settings.json scaffolded (trust-root deny-list + Bash guard hook — mechanical, not advisory)"
+    else
+        python3 - "$dev_guide_dst" "$init_pkg_dst" << 'MERGEEOF'
+import json, sys
+dev_guide_dst, init_pkg_dst = sys.argv[1], sys.argv[2]
+
+REQUIRED_DENY = [
+    "Bash(git reset --hard*)", "Bash(git rebase*)", "Bash(git clean*)",
+    "Bash(rm -rf*)", "Bash(sudo*)", "Bash(DROP *)", "Bash(TRUNCATE *)",
+    "Bash(DELETE FROM *)", "Bash(nc *)", "Bash(ssh *)", "Bash(scp *)",
+    "Bash(git push --force*)", "Bash(git push -f*)",
+    "Bash(git push --force-with-lease*)", "Bash(git push --mirror*)",
+    "Bash(git push --delete*)", "Bash(git commit --no-verify*)",
+    "Bash(git commit -n *)", "Bash(git push --no-verify*)",
+    "Bash(git -c core.hooksPath*)", "Bash(SKIP_GATE=*)",
+    "Read(.env)", "Read(**/.env)", "Read(**/.env.*)", "Read(**/*.pem)",
+    "Read(**/id_rsa*)", "Read(**/.aws/credentials)",
+    "Bash(cat .env*)", "Bash(cat **/.env*)", "Bash(cat **/*.pem*)",
+    "Bash(cat **/id_rsa*)", "Bash(cat **/.aws/credentials*)",
+    "Write(.githooks/**)", "Edit(.githooks/**)",
+    "Write(.claude/gate_integrity.sha256)", "Edit(.claude/gate_integrity.sha256)",
+    f"Write({dev_guide_dst})", f"Edit({dev_guide_dst})",
+    f"Write({init_pkg_dst})", f"Edit({init_pkg_dst})",
+    "Bash(git notes*remove*)", "Bash(git update-ref -d*)",
+    "Bash(git config core.hooksPath*)", "Bash(git config --add core.hooksPath*)",
+    "Bash(git commit -a*)", "Bash(git commit -am*)", "Bash(git commit --amend*)",
+]
+# Deliberately excludes Write/Edit(.claude/settings.json), Write/Edit(CLAUDE.md),
+# and Write/Edit(.claude/baseline.json) — see the note in the fresh-write branch
+# above. If this merge runs on a repo where the init prompt already completed
+# (those three ARE present), this loop leaves them untouched either way, since
+# it only adds entries that are missing — it never removes anything.
+
+with open('.claude/settings.json') as f:
+    d = json.load(f)
+
+perms = d.setdefault('permissions', {})
+perms.setdefault('defaultMode', 'default')
+deny = perms.setdefault('deny', [])
+added = [e for e in REQUIRED_DENY if e not in deny]
+deny.extend(added)
+
+hooks = d.setdefault('hooks', {})
+pretool = hooks.setdefault('PreToolUse', [])
+has_bash_guard = any(
+    h.get('matcher') == 'Bash' and
+    any('pre_bash_trust_root_guard.sh' in hh.get('command', '') for hh in h.get('hooks', []))
+    for h in pretool
+)
+if not has_bash_guard:
+    pretool.append({
+        "matcher": "Bash",
+        "hooks": [{"type": "command", "command": "bash .claude/hooks/pre_bash_trust_root_guard.sh"}]
+    })
+    added.append("hooks.PreToolUse[Bash guard]")
+
+with open('.claude/settings.json', 'w') as f:
+    json.dump(d, f, indent=2)
+
+if added:
+    print(f"Added {len(added)} missing trust-root protection(s) to existing .claude/settings.json")
+else:
+    print("Existing .claude/settings.json already has all trust-root protections")
+MERGEEOF
+    fi
+}
+
 _upgrade() {
     cd "$REPO_ROOT"
 
@@ -217,6 +379,19 @@ _upgrade() {
     _info "Re-copying gate.sh and hooks..."
     _write_hooks
     _success "Hooks updated."
+
+    # Backfill the trust-root settings.json scaffold for repos installed before
+    # it existed. Detect basket from whichever dev-guide filename is present —
+    # DEV_GUIDE_DST/INIT_PKG_DST aren't set in this flow the way they are in
+    # fresh install, since --upgrade never re-runs basket detection.
+    if [ -f "v1_claude_code_development_guide_new.md" ]; then
+        _write_trust_root_settings "v1_claude_code_development_guide_new.md" "v1_implementation_package_new.md"
+    elif [ -f "v1_claude_code_development_guide_existing.md" ]; then
+        _write_trust_root_settings "v1_claude_code_development_guide_existing.md" "v1_implementation_package_existing.md"
+    else
+        _warn "Could not detect basket (no dev guide found) — skipping trust-root settings.json backfill. Run install.sh's fresh-install flow if this repo predates the dev guide copy step."
+    fi
+    _success "Trust-root settings.json checked/backfilled."
 
     # CI workflow is force-overwritten on upgrade (unlike fresh install which skips if exists)
     mkdir -p .github/workflows
@@ -246,6 +421,8 @@ PYEOF
     echo "  ✓ .githooks/pre-commit"
     echo "  ✓ .githooks/pre-push"
     echo "  ✓ .claude/gate_integrity.sha256 (re-pinned to the new gate.sh)"
+    echo "  ✓ .claude/settings.json (trust-root deny-list + Bash guard hook — backfilled if missing)"
+    echo "  ✓ .claude/hooks/pre_bash_trust_root_guard.sh"
     echo "  ✓ .github/workflows/gate.yml"
     echo "  ✓ .claude/gate_state.json: framework_version → ${FRAMEWORK_SEMVER}"
     echo ""
@@ -254,13 +431,14 @@ PYEOF
     echo "  • CLAUDE.md (repo constitution — untouched)"
     echo "  • .mcp.json (graph config — untouched)"
     echo "  • gate_state.json: receipts, token data, thresholds, core_files"
+    echo "  • Any repo-specific permissions.allow entries already in settings.json"
     echo ""
     echo "This upgrade re-pinned .claude/gate_integrity.sha256 — CI will fail until"
     echo "the new pin is committed alongside the new gate.sh. Get this reviewed like"
     echo "any other change to the enforcement boundary, not rubber-stamped."
     echo ""
     echo "Commit the upgrade to activate it for the whole team:"
-    echo "  git add .githooks/ .claude/gate_integrity.sha256 .github/workflows/gate.yml .claude/gate_state.json"
+    echo "  git add .githooks/ .claude/gate_integrity.sha256 .claude/settings.json .claude/hooks/ .github/workflows/gate.yml .claude/gate_state.json"
     echo "  git commit -m 'chore: upgrade governance framework to ${FRAMEWORK_SEMVER}'"
     echo ""
 }
@@ -410,6 +588,11 @@ fi
 _info "Installing git hooks..."
 _write_hooks
 _success "Git hooks installed (.githooks/)"
+
+# ── STEP 4a: Trust-root settings.json (deny-list + Bash guard hook) ──────────
+_info "Scaffolding trust-root protections (.claude/settings.json)..."
+_write_trust_root_settings "$DEV_GUIDE_DST" "$INIT_PKG_DST"
+_success "Trust-root protections in place (mechanical, not left to the init prompt)."
 
 # CI parity workflow — the authoritative backstop if local hooks are stripped.
 mkdir -p .github/workflows
@@ -598,6 +781,7 @@ echo "  ✓ Init package:   ${INIT_PKG_DST}"
 echo "  ✓ Gate ledger:    .claude/gate_state.json"
 echo "  ✓ Git hooks:      .githooks/ (pre-commit, pre-push, gate.sh)"
 echo "  ✓ Integrity pin:  .claude/gate_integrity.sha256 (CI verifies gate.sh content against this)"
+echo "  ✓ Trust-root deny: .claude/settings.json (permissions.deny + Bash guard hook — mechanical)"
 echo "  ✓ CI workflow:    .github/workflows/gate.yml (CI parity backstop)"
 if [ "$BASKET" = "brownfield" ]; then
 echo "  ✓ Debt baseline:  .claude/baseline.json (unpopulated — init prompt fills it)"

@@ -20,7 +20,8 @@ EOF
     run run_gate GATE_TRIGGER=pre-commit \
         LINT_CMD='true' \
         TYPE_CMD='true' \
-        COMPLEXITY_CMD='true'
+        COMPLEXITY_CMD='true' \
+        TEST_CMD='true'
     [ "$status" -eq 1 ]
     [[ "$output" == *"Layer boundary violation"* ]]
     [[ "$output" == *"SERVICE_HAS_HTTP"* ]]
@@ -36,7 +37,8 @@ EOF
     run run_gate GATE_TRIGGER=pre-commit \
         LINT_CMD='true' \
         TYPE_CMD='true' \
-        COMPLEXITY_CMD='true'
+        COMPLEXITY_CMD='true' \
+        TEST_CMD='true'
     [ "$status" -eq 1 ]
     [[ "$output" == *"ROUTES_HAS_SQL"* ]]
 }

@@ -21,7 +21,8 @@ teardown() {
     run run_gate GATE_TRIGGER=pre-commit \
         LINT_CMD='echo "src/legacy.py:1:1: E501 line too long"; exit 1' \
         TYPE_CMD='true' \
-        COMPLEXITY_CMD='true'
+        COMPLEXITY_CMD='true' \
+        TEST_CMD='true'
     [ "$status" -eq 0 ]
     [[ "$output" == *"grandfathered"* ]]
 }
@@ -32,7 +33,8 @@ teardown() {
     run run_gate GATE_TRIGGER=pre-commit \
         LINT_CMD='echo "src/new_module.py:1:1: E999 new violation"; exit 1' \
         TYPE_CMD='true' \
-        COMPLEXITY_CMD='true'
+        COMPLEXITY_CMD='true' \
+        TEST_CMD='true'
     [ "$status" -eq 1 ]
     [[ "$output" == *"new lint findings not in baseline"* ]]
 }
