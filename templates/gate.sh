@@ -187,10 +187,33 @@ _ensure_graph_freshness() {
 }
 
 _is_claude_agent_process() {
-    # Traverse the OS process tree from PPID to PID 1; set IS_AGENT=true if any
-    # ancestor binary is the Claude Code CLI. Nested subshells cannot mask the match
-    # because the traversal climbs to the root terminal session unconditionally.
     IS_AGENT=false
+
+    # Environment-marker check first. Claude Code sets $CLAUDECODE in every
+    # process it spawns, and environment variables are inherited across
+    # setsid/nohup/disown/backgrounding — unlike PPID, which changes on
+    # reparenting. An agent that backgrounds a commit (`git commit ... &`)
+    # and lets its own tool call return before the commit finishes can sever
+    # the live process-tree link the walk below depends on: the orphaned
+    # child gets reparented (typically to PID 1 or a subreaper) before gate.sh
+    # ever runs, so the walk finds no claude-code ancestor at all. The env
+    # marker survives that because it's inherited at fork/exec time from the
+    # ORIGINAL environment, not read from the live process table at walk time.
+    # Known limitation: an agent that deliberately strips its own environment
+    # (`env -u CLAUDECODE ...` or `env -i ...`) before the command defeats
+    # this — the same fundamental limit as any client-side self-identification
+    # signal (see the Bash-guard hook's lexical-scanning limit, Module A7).
+    # This closes the realistic accidental-detachment case, not a deliberate,
+    # security-research-level evasion attempt.
+    if [ -n "${CLAUDECODE:-}" ]; then
+        IS_AGENT=true
+        return 0
+    fi
+
+    # Fallback: traverse the OS process tree from PPID to PID 1; set
+    # IS_AGENT=true if any ancestor binary is the Claude Code CLI. Covers the
+    # case where the env marker isn't set (older Claude Code versions, or a
+    # host that doesn't set it) but the process tree is still intact.
     CURRENT_PID=$PPID
     while [ "${CURRENT_PID:-0}" -gt 1 ] 2>/dev/null; do
         _AP_CMD=$(ps -p "$CURRENT_PID" -o command= 2>/dev/null | tr -d '\n' || echo "")
@@ -537,9 +560,23 @@ if [ "$GATE_TRIGGER" = "pre-push" ] || [ "$GATE_TRIGGER" = "ci" ] || [ "$CORE_FI
 fi
 
 # ── STEP 5: SECRETS SCAN ─────────────────────────────────────────────────────
+# Keyword patterns catch a secret when an English identifier (password,
+# secret, token, api_key...) sits near the value. They do NOT catch a bare
+# credential with no such identifier nearby. The format patterns below
+# (AKIA.../ghp_.../xox[baprs]-.../sk_live_.../pk_live_...) close that specific
+# gap for well-known, high-confidence credential prefixes — the same class of
+# signature git-secrets/gitleaks/trufflehog use, not a general entropy
+# scanner. A secret with no recognizable keyword AND no recognizable prefix
+# (e.g. a bare opaque token from an unlisted vendor) still is not caught; that
+# requires content-decoding/entropy analysis, out of scope for a keyword+
+# format scanner by design (see docs/SECURITY_POSTURE.md).
+# `BEGIN [A-Z ]*PRIVATE KEY` (replacing the old `BEGIN (RSA|EC|OPENSSH|PGP)`)
+# catches PKCS8 keys (`-----BEGIN PRIVATE KEY-----`, no algorithm prefix —
+# the modern default format for most tooling) that the old pattern missed,
+# along with every prefixed variant (RSA/EC/OPENSSH/DSA/ENCRYPTED/PGP).
 SECRETS_FOUND=0
 if git diff --cached --diff-filter=ACMR -p 2>/dev/null | \
-    grep -iE '(api[_-]?key|secret|password|token|private[_-]?key|aws_access|BEGIN (RSA|EC|OPENSSH|PGP))' 2>/dev/null | \
+    grep -iE '(api[_-]?key|secret|password|token|private[_-]?key|aws_access|BEGIN [A-Z ]*PRIVATE KEY|AKIA[0-9A-Z]{16}|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|sk_live_[A-Za-z0-9]{20,}|pk_live_[A-Za-z0-9]{20,})' 2>/dev/null | \
     grep -v '^---\|^+++\|^@@\|^#\|placeholder\|example\|REDACTED' 2>/dev/null | \
     grep -q .; then
     SECRETS_FOUND=1
