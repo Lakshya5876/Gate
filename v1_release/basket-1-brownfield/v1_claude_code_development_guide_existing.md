@@ -1274,6 +1274,35 @@ Resume instruction: <RESUME INSTRUCTION verbatim>
    If the user overrides and asks to continue anyway, state the risk once,
    then comply.
 
+### 4.1a Mechanical Capture (hooks) — What's Enforced vs. What's Still Judgment
+
+`checkpoint_tool.py` (installed to `.claude/checkpoint_tool.py`) mechanizes
+part of the protocol above via real Claude Code hooks, so it no longer
+depends entirely on the agent noticing its own state:
+
+- **`hook-stop`** blocks a turn from ending once file/commit/session-duration
+  thresholds are crossed (`gate_state.json`'s `thresholds.checkpoint_pressure`)
+  — this is the countable half of SD5, plus the "mandatory post-commit
+  checkpoint" rule, now enforced rather than merely instructed.
+- **`hook-pre-compact`** unconditionally snapshots objective git facts (sha,
+  branch, diff-stat) on any compaction — including a user-triggered
+  `/compact`, which `Stop` never sees at all.
+- **`hook-session-start`**, **`hook-post-bash`**, **`hook-post-write`**
+  mechanize the resume-protocol read and the pressure counters themselves.
+
+**What is NOT mechanized, and cannot be with hooks alone:** SD1 (re-reading a
+file), SD2 (repeating a diagnosed mistake), SD3 (narrating unprompted), and
+SD4 (hedging on a prior fact) are signals in the model's own reasoning — a
+`command`-type hook only sees tool-call events, never the reasoning that
+produced them. These remain your own judgment, exactly as before. The
+`checkpoint-search` command (search → timeline → show, progressive
+disclosure — never fetch full checkpoint bodies without filtering first) is
+a cheap way to check "have I already done this" before re-doing it, which
+helps you avoid triggering SD1/SD2 — it does not detect them for you.
+
+Full design notes and disclosed limitations: `docs/SECURITY_POSTURE.md` §7,
+`templates/checkpoint_tool.py`'s own module docstring.
+
 ## 4.2 The Gate-State Ledger
 
 ### 4.2.1 The problem it solves
@@ -2035,7 +2064,7 @@ test schemas, shared third-party sandbox keys or mock tenants.
 ```
 # ../project-auth/.env.worktree      (Engineer A)
 APP_PORT=8081
-TEST_DB_SCHEMA=test_auth_lakshya
+TEST_DB_SCHEMA=test_auth_engineera
 CACHE_DB=1
 QUEUE_NAMESPACE=wt_auth
 STRIPE_TEST_KEY=sk_test_wt_auth_xxx

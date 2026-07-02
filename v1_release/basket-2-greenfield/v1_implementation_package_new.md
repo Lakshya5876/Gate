@@ -2,9 +2,12 @@
 ## Edition: NEW PROJECTS (Greenfield)
 
 **Companion document:** `v1_claude_code_development_guide_new.md` (the Guide)
-**Time required:** ~12 minutes, once at project birth
+**Time required:** ~30-45 minutes, once at project birth — this now includes a real
+interrogation (6 rounds) and a spec-document review/approval step, not just a
+single prompt-and-done exchange.
 **Outcome:** A repository born governed — prescriptive architecture, hook-enforced
-gates from commit #1, zero debt ever.
+gates from commit #1, zero debt ever — plus an approved PRD/TRD/DB schema/user
+flows/system design under `docs/` that the scaffold is built to match.
 
 > **Status: V1 production-ready.** Specification verified through 3 audit rounds and mechanically tested: pre-commit fingerprint receipts, coverage gate, CORE_FILES tier-3 escalation, identity-based debt ratchet, CI backstop, and IDE extension crash guard all confirmed functional. Install and proceed.
 
@@ -39,9 +42,13 @@ gates from commit #1, zero debt ever.
 
 Open Claude Code at the repository root. Paste the entire prompt below verbatim.
 
-Unlike the brownfield edition there is no discovery report — there is nothing to
-discover. The prompt asks ONE consolidated question (your stack choices), then
-deploys everything without further conversation.
+Unlike the brownfield edition there is no existing codebase to discover — instead
+the prompt runs 6 rounds of mandatory questions (product/domain, stack,
+operational reality, risk posture, debt philosophy, CORE_FILES confirmation),
+then drafts a full set of spec documents (PRD, TRD, DB schema, user flows,
+system design, architecture decisions) under `docs/` and asks you to explicitly
+approve them. Nothing gets scaffolded or written until that approval — expect a
+real back-and-forth, not a single prompt-and-done exchange.
 
 ---------------------------------- PROMPT START ----------------------------------
 
@@ -205,14 +212,153 @@ you generate PRESCRIBES the ideal architecture. Every rule you write will be
 enforced by mechanical gates and SECTION 2.5 cognitive routing on every future
 task. A rule that doesn't match the repo creates permanent noise.
 
-PHASE A — STACK DECLARATION (one question, then zero conversation)
+PHASE A — MANDATORY INTERROGATION (6 rounds, each blocking — Phase A.5 does
+not start until round 5 is explicitly confirmed, and Phase B does not start
+until Phase A.5's spec documents are explicitly approved)
 
-Ask me ONE consolidated question covering:
-  1. Language + framework
-  2. Persistence layer (or "none yet")
-  3. Test framework, linter, type checker (propose stack-standard defaults
-     I can accept with one word)
-Wait for my answer. Everything after this runs without questions.
+You are about to write a constitution that will be mechanically enforced on
+every future task in this repository, and — per Phase A.5 below — a set of
+spec documents that PRESCRIBE what gets built. The Blocking Questions rule
+this same constitution imposes on all downstream work (Guide §2.5.6b: every
+hard stop and genuine scope fork is a structured, blocking question — e.g.
+AskUserQuestion — never a sentence buried in prose) applies to generating the
+constitution and the specs themselves, not just to work that happens after
+they exist.
+
+HARD RULE, applies to every round below and to Phase A.5: if you do not have
+enough information to answer a question confidently, or a human's answer is
+ambiguous enough that two different specs would result, STOP and ask a
+follow-up — do not guess, do not silently pick the more common default, and
+do not fabricate product/technical detail that was never actually stated.
+An assumed fact written into a PRD or DB schema is indistinguishable from a
+confirmed one to whoever reads it later; the cost of asking one more question
+is a few seconds, the cost of a silently-wrong spec is discovered much later
+and much more expensively. Assume the human answering these questions may be
+inexperienced with governance tooling and with writing specs — ask plainly,
+prefer concrete short-answer or one-word-acceptable questions over open-ended
+ones, and do not proceed past a round until it is answered.
+
+  ROUND 0 — Product & domain (this feeds the spec documents in Phase A.5 —
+  do not skip it or treat it as optional just because it isn't about code):
+    1. In one paragraph: what is this product/system, and what problem does
+       it solve? Who are the primary users?
+    2. What are the 3-7 core features or user stories that must exist for a
+       first version? (Not a wishlist — what's actually in scope now.)
+    3. What are the core data entities and how do they relate to each other,
+       at a conceptual level (e.g. "a User has many Orders, an Order has one
+       Shipment")? Skip only if round 1 establishes there's genuinely no
+       persistence layer yet.
+    4. What are the 2-4 most important user journeys/flows end to end (e.g.
+       "visitor signs up -> verifies email -> completes onboarding")?
+    5. Any known non-functional requirements: expected scale (users/requests),
+       performance or availability expectations, required third-party
+       integrations? "Don't know yet" is a legitimate answer — record it as
+       such in the spec rather than inventing a number.
+
+  ROUND 1 — Stack (as before):
+    1. Language + framework
+    2. Persistence layer (or "none yet")
+    3. Test framework, linter, type checker (propose stack-standard defaults
+       I can accept with one word)
+
+  ROUND 2 — Operational reality (do not assume a deploy pipeline or schema
+  exist just because this is a new project):
+    1. Does a deploy pipeline exist yet, or is this local-only for now? (If
+       none yet: release/hotfix branch strategies and their hard stops get
+       seeded as dormant placeholders, not active rules — activating them
+       later is a human edit, not something the agent infers on its own.)
+    2. Is there a real schema/migration story yet, or is persistence still
+       undecided? (If undecided: SQL-layer-boundary rules get seeded as
+       placeholders scoped to wherever persistence code eventually lands,
+       not enforced against nothing.)
+
+  ROUND 3 — Risk posture:
+    1. Any compliance/regulatory requirements today (SOC2, HIPAA, PCI, none
+       yet)? This changes which security invariants in Guide §2.2.1 are
+       load-bearing from day one versus boilerplate to relax later.
+    2. Team size and Claude Code governance experience (solo / small team new
+       to this / team already used to mechanical gates)? This changes default
+       friction — e.g. whether Tier-3 brainstorming (Guide §2.5.9) should be
+       stricter than the framework default from day one, or start lighter and
+       tighten later.
+
+  ROUND 4 — Debt philosophy:
+    True zero-tolerance from commit one (any lint/test failure blocks,
+    no ratchet — the framework default for greenfield, since install.sh does
+    not seed a baseline.json for this basket), or brownfield-style ratchet
+    leniency even though this is greenfield (some teams deliberately want a
+    lenient on-ramp while the team is still forming habits)? State which, and
+    why if it's not the default. If leniency is chosen: this is a mechanical
+    consequence, not just a stated preference — Phase B must additionally
+    create an UNPOPULATED `.claude/baseline.json`, in the exact shape
+    install.sh's own brownfield-only seeding step writes (see install.sh's
+    baseline.json heredoc: `ratchet_mode`, `populated: false`,
+    `generated_at: null`, `generated_from_sha`, `lint_findings: []`,
+    `summary.lint_count: 0`) — do not invent a different shape, since gate.sh
+    treats a missing baseline as zero-tolerance and only recognizes this
+    exact schema as "grandfather nothing yet, but a ratchet mechanism
+    exists." Do not claim leniency was configured without actually writing
+    this file.
+
+  ROUND 5 — CORE_FILES seed confirmation (mandatory, cannot be skipped):
+    Derive a proposed CORE_FILES seed list from rounds 1-4's answers (the
+    config module, src/domain/**, DI wiring, test fixtures, plus anything
+    round 2/3 flagged as load-bearing). Show me the proposed list explicitly
+    and wait for confirmation or edits before writing anything in Phase B.
+    Never seed a list I haven't seen.
+
+Only after round 5 is confirmed does Phase A.5 begin. Every "seeded with:" and
+"per Guide §X" instruction in Phase B below means "per what rounds 0-5 above
+actually established," not a hardcoded default — if an instruction in Phase B
+seems to assume something rounds 0-5 didn't establish, that is itself a gap:
+stop and ask, do not silently fill it in.
+
+PHASE A.5 — SPEC DOCUMENTS & APPROVAL (mandatory, blocks Phase B entirely —
+no scaffold, no CLAUDE.md, no code, until this phase's approval step
+completes)
+
+Using only what rounds 0-5 actually established (never filling a gap with
+invented detail — if you catch yourself about to write something no round
+answer supports, stop and ask instead), draft the following under `docs/` in
+this repository:
+
+  - `docs/PRD.md` — Product Requirements Document: the problem, the primary
+    users, the core features/user stories from round 0 stated as scoped
+    requirements (in/out of scope for v1), and the success criteria from
+    round 0 item 5 (or "not yet defined" if that's what was said — do not invent
+    a metric).
+  - `docs/TRD.md` — Technical Requirements Document: the stack from round 1,
+    the operational/deploy reality from round 2, the compliance and scale/
+    performance constraints from round 3 and round 0 item 5, and the debt
+    philosophy from round 4.
+  - `docs/DB_SCHEMA.md` — only if round 1 or round 0 established a real
+    persistence layer. The entities and relationships from round 0,
+    expressed as a concrete schema (tables/collections, key fields, and
+    relationships) consistent with round 1's stack choice. If persistence is
+    genuinely undecided, write a one-line placeholder file stating that,
+    not a speculative schema.
+  - `docs/USER_FLOWS.md` — the 2-4 journeys from round 0, each as a numbered
+    step-by-step flow.
+  - `docs/SYSTEM_DESIGN.md` — a high-level component/service breakdown
+    consistent with the four-layer architecture Phase B is about to scaffold
+    (Guide §2.2), any third-party integrations from round 0 item 5, and how the
+    layers in Phase B's B1 map onto the components described here — this
+    document and the scaffold Phase B produces must agree with each other.
+  - `docs/ARCHITECTURE_DECISIONS.md` — a short ADR-style log of the load-
+    bearing choices made across rounds 1-5 (stack, debt philosophy, which
+    security invariants are active vs. dormant per round 3) with a one-line
+    "why this over the alternative" for each — mirrors the CHECKPOINT
+    schema's existing "decisions locked: why this over the alternative"
+    convention (Guide §4.1) so the two stay consistent in style.
+
+APPROVAL GATE (cannot be skipped or auto-confirmed): once all applicable
+documents above are written, present them to me — either paste the full
+content or give a concise per-document summary with the file paths, your
+call based on total length — and explicitly ask me to approve, or to specify
+what to change. Do not proceed to Phase B on silence or on an ambiguous
+reply; if my reply doesn't clearly confirm approval, ask again. If I request
+changes, revise the affected document(s) and re-present before asking again.
+Only an explicit approval unblocks Phase B.
 
 PHASE B — SCAFFOLD DEPLOYMENT (write everything)
 
@@ -245,17 +391,23 @@ PHASE B — SCAFFOLD DEPLOYMENT (write everything)
         persist_*/remove_*, Execute*/Query* use cases, PascalCase entities,
         past-tense events, tests/<layer>/test_<module> mirror rule)
       - The universal security invariants (Guide §2.2.1) verbatim, including
-        the single-config-module rule
+        the single-config-module rule, weighted per round 3's compliance
+        answer (a stated regulatory requirement makes the matching invariant
+        load-bearing text, not boilerplate to soften later)
       - Hard stops (Guide §2.2.2 — the full table, which includes
         permission-mode/settings changes, CORE_FILES edits, and
-        quarantining a test that covers a CORE_FILES module)
+        quarantining a test that covers a CORE_FILES module). If round 2
+        established no deploy pipeline exists yet, mark the release/hotfix
+        branch-strategy hard stops as dormant placeholders in the table
+        (present in the text, explicitly noted as inactive until a pipeline
+        exists) rather than omitting or silently activating them.
       - The boundary caveats P1–P3 from Guide §2.3 (permission mode pinned;
         git push ALWAYS standalone, never inside &&, ;, or | chains;
         refspec-force banned in text and refused by the pre-push hook)
-      - The CORE_FILES constitution element per Guide §2.2.3, seeded with:
-        the config module, src/domain/**, DI wiring, and test fixtures —
-        maintained as the dependency graph grows (any module imported by
-        >5 others joins it; editing the list is a hard stop)
+      - The CORE_FILES constitution element per Guide §2.2.3, seeded with
+        exactly the list confirmed in Phase A round 5 — not re-derived or
+        expanded here — maintained as the dependency graph grows (any module
+        imported by >5 others joins it; editing the list is a hard stop)
       - Testing rules N1–N5 (Guide §6.1) plus the full §6.2 scaling block
         verbatim: the 60-second tier trigger, transitive closure for
         CORE_FILES, grep-is-a-lower-bound escalation (T4), committed
@@ -620,7 +772,7 @@ Then, end to end:
 |---|---|
 | Birth commit | Suite, linter, type checker all exit 0; pre-commit hook emits its first GATE REPORT |
 | First feature | Stubs compiled before implementation; one commit per layer |
-| Any lint/security finding | Hook BLOCKS — there is no baseline to absorb it |
+| Any lint/security finding | Hook BLOCKS (Phase A round 4 default: zero-tolerance, no baseline). If round 4 chose ratchet leniency, an unpopulated baseline.json exists instead — see round 4. |
 | Brand-new untracked file with a finding | Gate runs (fingerprint includes untracked files) and BLOCKS |
 | `SKIP_GATE=1` from a Claude session | Blocked by settings deny; TTY adds human-presence assurance where the agent has no terminal |
 | Session killed mid-task, reopened | Resume from checkpoint in under a minute |

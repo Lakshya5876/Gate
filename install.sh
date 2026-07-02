@@ -107,6 +107,12 @@ _write_trust_root_settings() {
     rm -f .claude/hooks/pre_bash_trust_root_guard.sh.bak
     chmod +x .claude/hooks/pre_bash_trust_root_guard.sh
 
+    # Graph read-time freshness guard — warns (never blocks) when a
+    # code-review-graph query tool is about to answer against a stale index.
+    # Fully static, no placeholder substitution needed.
+    _fetch "templates/graph_freshness_check.py" ".claude/hooks/graph_freshness_check.py"
+    chmod +x .claude/hooks/graph_freshness_check.py
+
     # Single canonical source for the trust-root deny-list. There used to be
     # a hand-duplicated JSON literal (fresh-write) and Python literal (merge)
     # that had, so far, stayed in sync only by luck — the same drift shape
@@ -135,6 +141,7 @@ REQUIRED_DENY = [
     "Write(.claude/hooks/**)", "Edit(.claude/hooks/**)",
     "Write(.claude/gate_integrity.sha256)", "Edit(.claude/gate_integrity.sha256)",
     "Write(.claude/gate_state.json)", "Edit(.claude/gate_state.json)",
+    "Write(.claude/checkpoint_tool.py)", "Edit(.claude/checkpoint_tool.py)",
     "Write(.github/workflows/gate.yml)", "Edit(.github/workflows/gate.yml)",
     "Write(.mcp.json)", "Edit(.mcp.json)",
     f"Write({dev_guide_dst})", f"Edit({dev_guide_dst})",
@@ -151,11 +158,22 @@ REQUIRED_DENY = [
 # ORDER). Also deliberately excludes .claude/checkpoints/**, .claude/commands/**,
 # and .claude/session_state.json — all legitimately agent-written on an
 # ongoing basis (checkpoint protocol, command generation, session tracking),
-# not install-time artifacts.
+# not install-time artifacts. checkpoint_tool.py itself IS protected above
+# (Write/Edit denied) despite living alongside those agent-writable paths —
+# it's the enforcement mechanism, not its data; the same distinction as
+# pre_bash_trust_root_guard.sh vs. the checkpoints it helps produce.
 
 BASH_GUARD_HOOK_ENTRY = {
     "matcher": "Bash",
     "hooks": [{"type": "command", "command": "bash .claude/hooks/pre_bash_trust_root_guard.sh"}]
+}
+# Matches every tool the code-review-graph MCP server exposes
+# (mcp__<server-name>__<tool-name> is Claude Code's MCP tool-naming
+# convention) rather than enumerating the five tool names individually, so a
+# future tool the server adds is covered without an install.sh change.
+GRAPH_FRESHNESS_HOOK_ENTRY = {
+    "matcher": "mcp__code-review-graph__.*",
+    "hooks": [{"type": "command", "command": "python3 .claude/hooks/graph_freshness_check.py"}]
 }
 
 if os.path.exists('.claude/settings.json'):
@@ -178,6 +196,14 @@ if os.path.exists('.claude/settings.json'):
         pretool.append(BASH_GUARD_HOOK_ENTRY)
         added.append("hooks.PreToolUse[Bash guard]")
 
+    has_graph_freshness = any(
+        any('graph_freshness_check.py' in hh.get('command', '') for hh in h.get('hooks', []))
+        for h in pretool
+    )
+    if not has_graph_freshness:
+        pretool.append(GRAPH_FRESHNESS_HOOK_ENTRY)
+        added.append("hooks.PreToolUse[graph freshness guard]")
+
     with open('.claude/settings.json', 'w') as f:
         json.dump(d, f, indent=2)
 
@@ -188,18 +214,23 @@ if os.path.exists('.claude/settings.json'):
 else:
     d = {
         "permissions": {"defaultMode": "default", "deny": REQUIRED_DENY},
-        "hooks": {"PreToolUse": [BASH_GUARD_HOOK_ENTRY]},
+        "hooks": {"PreToolUse": [BASH_GUARD_HOOK_ENTRY, GRAPH_FRESHNESS_HOOK_ENTRY]},
     }
     with open('.claude/settings.json', 'w') as f:
         json.dump(d, f, indent=2)
-    print(".claude/settings.json scaffolded (trust-root deny-list + Bash guard hook — mechanical, not advisory)")
+    print(".claude/settings.json scaffolded (trust-root deny-list + Bash guard hook + graph freshness guard — mechanical, not advisory)")
 PYEOF
+}
 
+_write_integrity_manifest() {
     # Multi-file CI integrity manifest — covers every static, install.sh-owned
-    # governance script, not just gate.sh. Computed HERE (after this function
-    # has written pre_bash_trust_root_guard.sh, and after _write_hooks — always
-    # called first — has written gate.sh/verify_governance_integrity.sh/
-    # pre-commit/pre-push) so every listed file already exists on disk.
+    # governance script, not just gate.sh. Callers must ensure every listed
+    # file already exists on disk first: _write_hooks (gate.sh,
+    # verify_governance_integrity.sh, pre-commit, pre-push),
+    # _write_trust_root_settings (pre_bash_trust_root_guard.sh,
+    # graph_freshness_check.py), and _write_checkpoint_memory
+    # (checkpoint_tool.py) — hence this is its own function, called once
+    # after all three, rather than embedded at the end of any one of them.
     # Regenerated on every fresh install AND every --upgrade, so it never
     # drifts from what's actually deployed. Uses sha256sum/shasum's native
     # manifest format (`<hash>  <path>` per line) so verify_governance_integrity.sh
@@ -211,6 +242,8 @@ PYEOF
             .githooks/pre-commit \
             .githooks/pre-push \
             .claude/hooks/pre_bash_trust_root_guard.sh \
+            .claude/hooks/graph_freshness_check.py \
+            .claude/checkpoint_tool.py \
             > .claude/gate_integrity.sha256
     elif command -v shasum >/dev/null 2>&1; then
         shasum -a 256 \
@@ -219,10 +252,122 @@ PYEOF
             .githooks/pre-commit \
             .githooks/pre-push \
             .claude/hooks/pre_bash_trust_root_guard.sh \
+            .claude/hooks/graph_freshness_check.py \
+            .claude/checkpoint_tool.py \
             > .claude/gate_integrity.sha256
     else
         _error "Could not compute integrity manifest (need sha256sum or shasum)."
     fi
+}
+
+_write_init_command() {
+    # One-command init: extract the PROMPT START/END block from the init
+    # package (the exact content a human would otherwise open the file and
+    # copy-paste) and write it as a real slash command, so the remaining
+    # manual step becomes "type /init-governance" instead of "open a file,
+    # select all, copy, paste into a fresh conversation, hope nothing got
+    # truncated." Uses the mechanism already proven working in downstream
+    # installs (/audit, /review, /feature, etc. are plain .claude/commands/*.md
+    # files with no frontmatter — the first line becomes the picker
+    # description). Basket-agnostic: operates on whichever init package was
+    # already fetched locally, greenfield or brownfield.
+    local init_pkg_dst="$1"
+    python3 - "$init_pkg_dst" << 'PYEOF'
+import sys
+init_pkg_dst = sys.argv[1]
+with open(init_pkg_dst) as f:
+    lines = f.readlines()
+start = next(i for i, l in enumerate(lines) if 'PROMPT START' in l) + 1
+end = next(i for i, l in enumerate(lines) if 'PROMPT END' in l)
+prompt_body = ''.join(lines[start:end]).strip()
+description = (
+    "One-time governance bootstrap (run once, immediately after install.sh) — "
+    "interrogates you about your stack and architecture, then writes CLAUDE.md, "
+    f"layer scaffolding, and enforcement hooks. Source of truth: {init_pkg_dst}."
+)
+with open('.claude/commands/init-governance.md', 'w') as f:
+    f.write(description + "\n\n" + prompt_body + "\n")
+PYEOF
+}
+
+_write_checkpoint_memory() {
+    # Mechanical checkpoint capture + progressive-disclosure retrieval —
+    # adopts claude-mem's two concepts (hook-driven capture instead of agent
+    # self-judgment; index-before-fetch retrieval) without its runtime stack.
+    # See templates/checkpoint_tool.py's own module docstring for full design
+    # notes and the one disclosed limitation (Stop-hook contract verified
+    # standalone, not against a live Claude Code session).
+    mkdir -p .claude/checkpoints .claude/commands
+    _fetch "templates/checkpoint_tool.py" ".claude/checkpoint_tool.py"
+    chmod +x .claude/checkpoint_tool.py
+    [ -f ".claude/checkpoints/index.jsonl" ] || touch ".claude/checkpoints/index.jsonl"
+    _fetch "templates/checkpoint_search_command.md" ".claude/commands/checkpoint-search.md"
+
+    # Own merge pass, independent of _write_trust_root_settings's — both do
+    # read-current-then-write-back, so running sequentially (not
+    # concurrently) in the same install is safe; keeping them separate
+    # functions avoids one already-large merge block growing unreadable.
+    python3 << 'PYEOF'
+import json, os
+
+CHECKPOINT_HOOKS = {
+    "SessionStart": {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-session-start"}],
+    },
+    "PreCompact": {
+        "matcher": "*",
+        "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-pre-compact"}],
+    },
+    "Stop": {
+        "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-stop"}],
+    },
+}
+POST_TOOL_HOOKS = [
+    {"matcher": "Bash", "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-post-bash"}]},
+    {"matcher": "Write|Edit|MultiEdit", "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-post-write"}]},
+]
+
+if not os.path.exists('.claude/settings.json'):
+    # _write_trust_root_settings always runs before this in both the fresh-
+    # install and --upgrade flows, so settings.json should already exist —
+    # this branch only guards against being called out of order.
+    print("checkpoint memory: .claude/settings.json missing — run _write_trust_root_settings first")
+else:
+    with open('.claude/settings.json') as f:
+        d = json.load(f)
+    hooks = d.setdefault('hooks', {})
+    added = []
+
+    for event, entry in CHECKPOINT_HOOKS.items():
+        bucket = hooks.setdefault(event, [])
+        already = any(
+            any('checkpoint_tool.py' in hh.get('command', '') for hh in h.get('hooks', []))
+            for h in bucket
+        )
+        if not already:
+            bucket.append(entry)
+            added.append(f"hooks.{event}[checkpoint memory]")
+
+    posttool = hooks.setdefault('PostToolUse', [])
+    for entry in POST_TOOL_HOOKS:
+        wanted_cmd = entry['hooks'][0]['command']
+        already = any(
+            any(hh.get('command') == wanted_cmd for hh in h.get('hooks', []))
+            for h in posttool
+        )
+        if not already:
+            posttool.append(entry)
+            added.append(f"hooks.PostToolUse[{entry['matcher']}]")
+
+    with open('.claude/settings.json', 'w') as f:
+        json.dump(d, f, indent=2)
+
+    if added:
+        print(f"checkpoint memory: added {len(added)} hook registration(s) to .claude/settings.json")
+    else:
+        print("checkpoint memory: hooks already registered in .claude/settings.json")
+PYEOF
 }
 
 _upgrade() {
@@ -246,12 +391,28 @@ _upgrade() {
     # fresh install, since --upgrade never re-runs basket detection.
     if [ -f "v1_claude_code_development_guide_new.md" ]; then
         _write_trust_root_settings "v1_claude_code_development_guide_new.md" "v1_implementation_package_new.md"
+        mkdir -p .claude/commands
+        _write_init_command "v1_implementation_package_new.md"
+        _write_checkpoint_memory
     elif [ -f "v1_claude_code_development_guide_existing.md" ]; then
         _write_trust_root_settings "v1_claude_code_development_guide_existing.md" "v1_implementation_package_existing.md"
+        mkdir -p .claude/commands
+        _write_init_command "v1_implementation_package_existing.md"
+        _write_checkpoint_memory
     else
         _warn "Could not detect basket (no dev guide found) — skipping trust-root settings.json backfill. Run install.sh's fresh-install flow if this repo predates the dev guide copy step."
     fi
     _success "Trust-root settings.json checked/backfilled."
+    _success ".claude/commands/init-governance.md checked/backfilled."
+    _success "Checkpoint memory checked/backfilled."
+
+    # Re-pin the integrity manifest — must run after every governance script
+    # above exists, and unconditionally (not inside the if/elif above), since
+    # _write_hooks (called unconditionally at the top of _upgrade) always
+    # updates gate.sh/verify_governance_integrity.sh/pre-commit/pre-push
+    # regardless of whether basket detection succeeded.
+    _write_integrity_manifest
+    _success "Integrity manifest re-pinned (.claude/gate_integrity.sha256)."
 
     # CI workflow is force-overwritten on upgrade (unlike fresh install which skips if exists)
     mkdir -p .github/workflows
@@ -282,7 +443,8 @@ PYEOF
     echo "  ✓ .githooks/pre-commit"
     echo "  ✓ .githooks/pre-push"
     echo "  ✓ .claude/gate_integrity.sha256 (re-pinned — multi-file manifest covering gate.sh,"
-    echo "    verify_governance_integrity.sh, pre-commit, pre-push, and the Bash-guard hook)"
+    echo "    verify_governance_integrity.sh, pre-commit, pre-push, the Bash-guard hook, the"
+    echo "    graph freshness guard, and the checkpoint memory tool)"
     echo "  ✓ .claude/settings.json (trust-root deny-list + Bash guard hook — backfilled if missing)"
     echo "  ✓ .claude/hooks/pre_bash_trust_root_guard.sh"
     echo "  ✓ .github/workflows/gate.yml"
@@ -300,7 +462,7 @@ PYEOF
     echo "reviewed like any other change to the enforcement boundary, not rubber-stamped."
     echo ""
     echo "Commit the upgrade to activate it for the whole team:"
-    echo "  git add .githooks/ .claude/gate_integrity.sha256 .claude/settings.json .claude/hooks/ .github/workflows/gate.yml .claude/gate_state.json"
+    echo "  git add .githooks/ .claude/gate_integrity.sha256 .claude/settings.json .claude/hooks/ .claude/checkpoint_tool.py .claude/commands/ .github/workflows/gate.yml .claude/gate_state.json"
     echo "  git commit -m 'chore: upgrade governance framework to ${FRAMEWORK_SEMVER}'"
     echo ""
 }
@@ -407,6 +569,9 @@ _success "Init package copied: ${INIT_PKG_DST}"
 _info "Scaffolding .claude/ directory..."
 mkdir -p .claude/commands .claude/checkpoints
 
+_write_init_command "$INIT_PKG_DST"
+_success ".claude/commands/init-governance.md created (run /init-governance instead of copy-pasting ${INIT_PKG_DST})"
+
 # gate_state.json from template
 _fetch "templates/gate_state.json" ".claude/gate_state.json"
 # Stamp today's date into token.token_last_reset
@@ -455,6 +620,15 @@ _success "Git hooks installed (.githooks/)"
 _info "Scaffolding trust-root protections (.claude/settings.json)..."
 _write_trust_root_settings "$DEV_GUIDE_DST" "$INIT_PKG_DST"
 _success "Trust-root protections in place (mechanical, not left to the init prompt)."
+
+# ── STEP 4b: Mechanical checkpoint memory (must run after settings.json exists) ──
+_info "Scaffolding mechanical checkpoint memory..."
+_write_checkpoint_memory
+_success "Checkpoint memory installed (.claude/checkpoint_tool.py, /checkpoint-search command, hooks registered)"
+
+# ── STEP 4c: Integrity manifest (must run after every governance script above exists) ──
+_write_integrity_manifest
+_success "Integrity manifest computed (.claude/gate_integrity.sha256)"
 
 # CI parity workflow — the authoritative backstop if local hooks are stripped.
 mkdir -p .github/workflows
@@ -642,8 +816,10 @@ echo "  ✓ Dev guide:      ${DEV_GUIDE_DST}"
 echo "  ✓ Init package:   ${INIT_PKG_DST}"
 echo "  ✓ Gate ledger:    .claude/gate_state.json"
 echo "  ✓ Git hooks:      .githooks/ (pre-commit, pre-push, gate.sh, verify_governance_integrity.sh)"
-echo "  ✓ Integrity pin:  .claude/gate_integrity.sha256 (multi-file manifest — CI verifies all 5 governance scripts against this)"
+echo "  ✓ Integrity pin:  .claude/gate_integrity.sha256 (multi-file manifest — CI verifies all 7 governance scripts against this)"
 echo "  ✓ Trust-root deny: .claude/settings.json (permissions.deny + Bash guard hook — mechanical)"
+echo "  ✓ Init command:   .claude/commands/init-governance.md (run /init-governance next, instead of copy-pasting ${INIT_PKG_DST})"
+echo "  ✓ Checkpoint memory: .claude/checkpoint_tool.py + .claude/commands/checkpoint-search.md (mechanical capture + progressive-disclosure search)"
 echo "  ✓ CI workflow:    .github/workflows/gate.yml (CI parity backstop)"
 if [ "$BASKET" = "brownfield" ]; then
 echo "  ✓ Debt baseline:  .claude/baseline.json (unpopulated — init prompt fills it)"

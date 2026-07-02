@@ -87,6 +87,15 @@ print('all .claude/hooks/ files covered')
     # file covered by the deny-list is also in the CI integrity manifest —
     # tool-level protection without a content-hash backstop would only stop
     # Claude-Code-mediated tampering, not a direct commit.
+    #
+    # _write_integrity_manifest is its own function now (split out of
+    # _write_trust_root_settings so it can run after _write_checkpoint_memory
+    # too, which writes .claude/checkpoint_tool.py — one of the files the
+    # real manifest covers) — this test's setup() only ran _write_hooks and
+    # _write_trust_root_settings, so both calls below are needed to reach the
+    # same end state install.sh actually produces before the manifest exists.
+    _write_checkpoint_memory
+    _write_integrity_manifest
     run python3 -c "
 import sys
 

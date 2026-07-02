@@ -32,7 +32,7 @@
 
 The framework emerged from a core insight: **Claude Code is powerful, but needs mechanical guardrails, not recommendations.**
 
-**Original constraint:** A 200k LOC brownfield repo at LJI (Lakshya's employer) needed automated quality gates to catch regressions before they hit production. Manual code review was becoming a bottleneck.
+**Original constraint:** A 200k LOC brownfield repo at a mid-size engineering org needed automated quality gates to catch regressions before they hit production. Manual code review was becoming a bottleneck.
 
 **Design principle:** Build one framework that scales. Don't optimize for "quick setup"—optimize for "works exactly the same at 10k LOC and 1M LOC."
 
@@ -823,7 +823,7 @@ SKIP_GATE=1 git commit -m "Emergency fix: disable pre-commit checks"
    refs/notes/bypasses:
    commit=abc123def456
    reason="Database migration inconsistency, manual fix applied"
-   committer="lakshya.diwani@lji.io"
+   committer="dev@example.com"
    timestamp="2026-06-18T14:23:45Z"
    expires="2026-06-19T14:23:45Z"
    ```

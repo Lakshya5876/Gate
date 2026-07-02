@@ -56,9 +56,20 @@ The installer copies the dev guide + init package into your project root, scaffo
 `.github/workflows/gate.yml`.
 
 **Step 4 — Execute the initialization package**
-Open Claude Code (CLI or Desktop app) in your new project. Locate the "SYSTEM PROMPT" section
-in `v1_implementation_package_new.md` and paste **ONLY THAT SECTION** as your first message.
-Claude Code will automatically:
+Open Claude Code (CLI or Desktop app) in your new project and type:
+```
+/init-governance
+```
+The installer already wrote this command from the exact same prompt content you'd otherwise
+copy-paste — no file to open, no risk of pasting a truncated selection. (If you're on a
+pre-`/init-governance` install, or prefer to read the prompt first: locate the "SYSTEM PROMPT"
+section in `v1_implementation_package_new.md` and paste **ONLY THAT SECTION** as your first
+message instead — same content, same result.)
+Claude Code will first run 6 rounds of questions (product/domain, stack, operational
+reality, risk posture, debt philosophy, CORE_FILES), then draft a PRD, TRD, DB schema,
+user flows, system design, and architecture-decisions doc under `docs/` and ask you to
+explicitly approve them — nothing below happens until you do. After approval, it will
+automatically:
 
 - Scaffold the four-layer directory structure:
   - `domain/` — pure data contracts and Pydantic models, zero framework dependencies

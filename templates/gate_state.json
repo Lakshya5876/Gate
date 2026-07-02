@@ -11,7 +11,8 @@
     "coverage_pct": 80,
     "complexity_max": 10,
     "command_timeout_sec": 30,
-    "git_cache_ttl_sec": 60
+    "git_cache_ttl_sec": 60,
+    "checkpoint_pressure": { "files": 8, "commits": 1, "session_hours": 3 }
   },
 
   "core_files": [],
@@ -29,6 +30,9 @@
     "config_path": ".mcp.json",
     "last_build_timestamp": null,
     "node_count": 0,
+    "restart_count": 0,
+    "restart_last_ts": null,
+    "_restart_comment": "Written by _ensure_graph_alive (gate.sh) when a build's PID file points to a dead process without its own cleanup having run — i.e. a crash, not a normal exit. Capped at 3 restarts per rolling 24h window; count resets on the next successful freshness rebuild.",
     "included_domains": [
       "application_code",
       "sql_migrations",

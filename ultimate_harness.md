@@ -554,8 +554,8 @@ git cat-file -p HEAD
 # Example output:
 # tree 9f12a3c4b5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0
 # parent 3d2c1b0a9f8e7d6c5b4a3f2e1d0c9b8a7f6e5d4
-# author Lakshya Diwani <lakshya@lji.io> 1751340000 +0530
-# committer Lakshya Diwani <lakshya@lji.io> 1751340000 +0530
+# author Jane Doe <jane@example.com> 1751340000 +0530
+# committer Jane Doe <jane@example.com> 1751340000 +0530
 #
 # feat: add billing report
 ```
@@ -1881,6 +1881,14 @@ But PID 1234 and PID 1235 race. If PID 1235 finishes first (unlikely but possibl
 
 `nohup ... &` runs the command immune to SIGHUP (terminal close), detached from the foreground. The `$!` captures the PID of the last backgrounded process.
 
+### 4.9.1 `_ensure_graph_alive` — Crash Resilience, Not a Persistent Daemon
+
+The kill-restart lifecycle above only fires when the *current* gate run's `CHANGED_FILES` matches the graph-relevant extension filter. If `code-review-graph build` crashes on a commit that doesn't touch such a file, `.claude/graph.pid` is left pointing at a dead process indefinitely — no future gate run would ever notice, since freshness's own guard clause returns early before it gets that far.
+
+`_ensure_graph_alive` (in `templates/gate.sh`, called only when `GATE_TRIGGER=pre-push`) closes that specific gap: it checks whether the PID in `.claude/graph.pid` is dead, or alive but no longer actually `code-review-graph` (guarding the same OS-PID-reuse class of bug the kill-restart path above already guards against before calling `kill -9`), and relaunches the build if so. Restarts are capped at 3 per rolling 24h window, tracked in `gate_state.json`'s `mcp_graph.restart_count`/`restart_last_ts`, and reset the moment a normal freshness rebuild succeeds.
+
+This is deliberately a watchdog, not a redesign toward a persistent cross-session daemon: `code-review-graph serve` stays a plain per-session stdio MCP process (see `.mcp.json` in §6.9–6.10), and a crash never blocks the gate — it only means graph-backed review context may be stale until the restart catches up. The full disclosed scope and limitations are documented in `docs/SECURITY_POSTURE.md` §7, with behavior pinned by `tests/gate/graph_watchdog.bats`.
+
 ---
 
 ## 4.10 _is_claude_agent_process — OS Process Tree Traversal
@@ -2342,6 +2350,8 @@ Why exclude line numbers? If a developer adds 5 lines of comments above an exist
 ### Layer boundary scan
 
 The layer boundary scan is STEP 6.5, explained fully in Module 2.5 (it catches SQL in route files and HTTP imports in service files). The actual code is at lines 760–817, shown verbatim in the earlier reading of gate.sh.
+
+**Lint-based supplement:** `templates/.pylintrc.layer-boundary` and `templates/eslint-layer-boundary.snippet.cjs` add a second, independent HTTP-import check on top of STEP 6.5's grep, using each linter's own native banned-import mechanism (pylint's `deprecated-module`, ESLint's `no-restricted-imports`) rather than a bespoke plugin. Wire the pylint config into the target's `LINT_CMD` scoped to its services/application directories, and merge the ESLint snippet's override into the target's own `.eslintrc`/flat config — install.sh does not do this automatically, since `LINT_CMD` itself is filled in per-target-repo during init-time reconnaissance, not hardcoded in this framework. See the module 4.21 pinned-limitation discussion below and `docs/SECURITY_POSTURE.md` §7 for exactly what this does and does not close.
 
 ---
 
@@ -4987,6 +4997,8 @@ Before evaluating a single new finding, the git history was checked directly: ev
 **Disclosed, not claimed fixed:** a secret with no recognizable keyword *and* no recognizable format signature (an opaque token from an unlisted vendor, or a value split across string concatenation) is still not caught. Closing that requires content-decoding/entropy analysis — a different class of tool entirely, explicitly out of scope for a bounded keyword-plus-format scanner.
 
 **3. The layer-boundary scanner's grep-based approach has a real, disclosed limitation that a dedicated test now pins.** Verified an aliased import (`from fastapi import HTTPException as HTTPErr`) is still correctly caught — aliasing doesn't remove the literal substring the anchor-matched regex is looking for. Also verified — and wrote a test that asserts the miss rather than pretending to fix it — that an HTTP import re-exported through an intermediate module (`from myapp.http_shim import raise_http_error`, where `http_shim.py` itself imports FastAPI) evades detection entirely, since a line-level grep cannot see what a different file imports. Closing this needs an import-graph/AST parser — the MCP graph server's actual job — not a bounded grep change. The test exists specifically so this limitation is pinned and visible, not silently rediscovered as "new" by the next audit.
+
+**Supplement added, not a fix for the above:** `templates/.pylintrc.layer-boundary` and `templates/eslint-layer-boundary.snippet.cjs` wire pylint's native `deprecated-module` check and ESLint's native `no-restricted-imports` rule (both built-in, AST-based, no custom plugin) into the services layer, invoked as a second, independent pass alongside the grep. Empirically verified (pylint 4.0.6, eslint 8.57.1): both catch strictly more than the grep — aliased imports, `import x as y` renames, and submodule imports of a banned package (`fastapi.responses`, `express/lib/router`) — while a sibling-submodule of a *partially* banned package (`django.db` when only `django.http` is banned) correctly stays clean. Neither catches the `http_shim.py` re-export case above, for the identical reason: both only inspect the import statement in the file being scanned, not where the imported name is actually defined. Same disclosed limitation, same reason it's out of scope, now demonstrated at two independent layers instead of one — see `docs/SECURITY_POSTURE.md` §7 and `tests/gate/layer_boundary_lint_supplement.bats`.
 
 ### Verification
 

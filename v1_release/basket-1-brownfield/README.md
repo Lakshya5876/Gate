@@ -87,9 +87,15 @@ The installer copies the dev guide + init package into your repo root, scaffolds
 workflow at `.github/workflows/gate.yml`.
 
 **Step 4 — Execute the initialization package**
-Open Claude Code (CLI or Desktop app) in your target repository. Locate the "SYSTEM PROMPT"
-section in `v1_implementation_package_existing.md` and paste **ONLY THAT SECTION** as your
-first message. Do not paste the entire document. Claude Code runs automated reconnaissance,
+Open Claude Code (CLI or Desktop app) in your target repository and type:
+```
+/init-governance
+```
+The installer already wrote this command from the exact same prompt content you'd otherwise
+copy-paste — no file to open, no risk of pasting a truncated selection. (If you're on a
+pre-`/init-governance` install, or prefer to read the prompt first: locate the "SYSTEM PROMPT"
+section in `v1_implementation_package_existing.md` and paste **ONLY THAT SECTION** as your first
+message instead — same content, same result. Do not paste the entire document.) Claude Code runs automated reconnaissance,
 maps your architecture, populates the debt baseline, and generates `CLAUDE.md` — one time,
 fully automated.
 

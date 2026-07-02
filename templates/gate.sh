@@ -80,7 +80,18 @@ with open('$1', 'w') as f:
 }
 
 _json_append_audit() {
-    # Append one entry to token.token_audit_log; prune entries older than 90 days
+    # Append one entry to token.token_audit_log; prune entries older than 90 days.
+    # Guard matches every other GATE_STATE-touching function (_receipt_write,
+    # _receipt_has_pass) — without it, a missing ledger (accidental deletion,
+    # a bad merge, disk issue, or simply testing hook functions in isolation
+    # without the full install flow) turned the LAST call in gate.sh's
+    # success path into an unguarded FileNotFoundError. Under `set -e` that
+    # silently aborted the whole script right after "receipt written" and
+    # before "GATE PASS" ever printed — a real commit that passed every
+    # actual check still failed, with a raw Python traceback instead of a
+    # clear message. Found via a real end-to-end commit test, not by
+    # inspection — pinned in tests/gate/audit_log_resilience.bats.
+    [ -f "$GATE_STATE" ] || return 0
     python3 -c "
 import json, sys
 from datetime import datetime, timedelta
@@ -157,6 +168,14 @@ except Exception:
 " 2>/dev/null || echo "no"
 }
 
+_graph_spawn_build() {
+    # Usage: _graph_spawn_build <pid_file> — shared by freshness and the
+    # watchdog so both spawn identically and clean up their own pid file.
+    _GSB_PID_FILE="$1"
+    nohup bash -c "code-review-graph build > /dev/null 2>&1; rm -f '$_GSB_PID_FILE'" > /dev/null 2>&1 &
+    echo $! > "$_GSB_PID_FILE"
+}
+
 _ensure_graph_freshness() {
     # Kill-and-restart lifecycle: always rebuilds for the current HEAD.
     # If a prior build is still running, it is explicitly terminated before
@@ -181,9 +200,81 @@ _ensure_graph_freshness() {
         fi
         rm -f "$_GF_PID_FILE"
     fi
-    nohup bash -c "code-review-graph build > /dev/null 2>&1; rm -f '$_GF_PID_FILE'" > /dev/null 2>&1 &
-    echo $! > "$_GF_PID_FILE"
+    _graph_spawn_build "$_GF_PID_FILE"
     echo -e "${GREEN}GATE: graph index refreshing in background.${RESET}" >&2
+    # A fresh build was just spawned for the current HEAD — any earlier crash
+    # is moot now, so the watchdog's restart counter no longer applies.
+    [ -f "$GATE_STATE" ] && _json_set "$GATE_STATE" "mcp_graph.restart_count" "0"
+}
+
+_ensure_graph_alive() {
+    # Watchdog, not freshness: _ensure_graph_freshness only rebuilds when
+    # THIS gate run touches a graph-relevant file (CHANGED_FILES matches its
+    # extension filter). If code-review-graph build crashed on an earlier
+    # commit that didn't touch such a file, the stale index sits there
+    # indefinitely — no future gate run would ever notice or retrigger it.
+    # This closes that gap: it looks for a pid file whose process died
+    # WITHOUT the build's own cleanup trap running (a clean exit always
+    # removes its own pid file — see _graph_spawn_build), which is the
+    # signature of a crash rather than a normal completion, and relaunches.
+    #
+    # Recovers from crashes; does not prevent them. Never blocks the gate —
+    # if you see multiple restarts logged in one sitting, report it, since
+    # that means code-review-graph is crash-looping, not that this watchdog
+    # is failing to do its job.
+    [ -f ".mcp.json" ] || return 0
+    command -v code-review-graph >/dev/null 2>&1 || return 0
+    _GA_PID_FILE=".claude/graph.pid"
+    [ -f "$_GA_PID_FILE" ] || return 0
+    _GA_PID=$(cat "$_GA_PID_FILE" 2>/dev/null)
+    if [ -z "$_GA_PID" ]; then
+        rm -f "$_GA_PID_FILE"
+        return 0
+    fi
+    if kill -0 "$_GA_PID" 2>/dev/null; then
+        # Alive isn't enough on its own — OS PID reuse could mean the real
+        # indexer crashed and the OS handed its old PID to something else
+        # entirely (the same class of bug _ensure_graph_freshness's kill path
+        # already guards against before calling kill -9). Confirm identity
+        # before trusting it as "still running".
+        _GA_CMD=$(ps -p "$_GA_PID" -o command= 2>/dev/null | tr -d '\n' || echo "")
+        if echo "$_GA_CMD" | grep -q "code-review-graph"; then
+            return 0
+        fi
+        echo -e "${YELLOW}[GRAPH GUARD] PID ${_GA_PID} reused by unrelated process — treating as crashed.${RESET}" >&2
+    fi
+
+    # Restart-count bookkeeping. This isn't a true session boundary (gate_state.json
+    # persists across commits), so a 24h rolling window is used as a practical stand-in:
+    # crash-loop counts reset once a day rather than accumulating forever.
+    _GA_COUNT=0
+    _GA_MAX=3
+    if [ -f "$GATE_STATE" ]; then
+        _GA_COUNT=$(_json_get "$GATE_STATE" "mcp_graph.restart_count")
+        _GA_LAST=$(_json_get "$GATE_STATE" "mcp_graph.restart_last_ts")
+        case "$_GA_COUNT" in ''|*[!0-9]*) _GA_COUNT=0 ;; esac
+        if [ -n "$_GA_LAST" ] && [ "$_GA_LAST" != "null" ]; then
+            _GA_LAST_EPOCH=$(date -d "$_GA_LAST" +%s 2>/dev/null || date -j -f "%Y-%m-%dT%H:%M:%SZ" "$_GA_LAST" +%s 2>/dev/null || echo "0")
+            _GA_NOW_EPOCH=$(date +%s 2>/dev/null || echo "0")
+            if [ "${_GA_NOW_EPOCH:-0}" -gt 0 ] && [ "${_GA_LAST_EPOCH:-0}" -gt 0 ] && [ $(( _GA_NOW_EPOCH - _GA_LAST_EPOCH )) -gt 86400 ]; then
+                _GA_COUNT=0
+            fi
+        fi
+    fi
+
+    if [ "$_GA_COUNT" -ge "$_GA_MAX" ]; then
+        echo -e "${YELLOW}[GRAPH GUARD] code-review-graph has crashed ${_GA_COUNT} times in the last 24h — auto-restart capped at ${_GA_MAX}. Graph-backed review may be stale; investigate and report.${RESET}" >&2
+        return 0
+    fi
+
+    _GA_COUNT=$((_GA_COUNT + 1))
+    if [ -f "$GATE_STATE" ]; then
+        _json_set "$GATE_STATE" "mcp_graph.restart_count" "$_GA_COUNT"
+        _json_set "$GATE_STATE" "mcp_graph.restart_last_ts" "\"${NOW_ISO:-}\""
+    fi
+    echo -e "${YELLOW}[GRAPH GUARD] code-review-graph build crashed (pid ${_GA_PID} gone without its normal cleanup) — restarting (attempt ${_GA_COUNT}/${_GA_MAX}).${RESET}" >&2
+    rm -f "$_GA_PID_FILE"
+    _graph_spawn_build "$_GA_PID_FILE"
 }
 
 _is_claude_agent_process() {
@@ -298,6 +389,56 @@ except Exception:
         exit 1
     fi
 fi
+
+# ── STEP 1.5: S3-BACKED ORG POLICY FETCH (tamper-evident budget) ───────────────
+# Fetch the org-wide token budget from S3 with local caching + conservative fallback.
+# If S3 is unreachable and no cache exists, default to TOKEN_BUDGET=0 (fail-safe).
+_fetch_org_policy_from_s3() {
+    local s3_uri="${S3_ORG_POLICY_URI:-s3://company-config/org_policy.json}"
+    local cache_file="$ORG_POLICY"
+    local cache_ttl_sec=$((24 * 3600))  # 1 day
+
+    # Skip fetch in CI — use committed version only
+    if [ "${GATE_TRIGGER}" = "ci" ]; then
+        return 0
+    fi
+
+    # Check if cached version is still fresh
+    if [ -f "$cache_file" ]; then
+        local now_epoch=$(date +%s)
+        local file_mtime=$(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null || echo "0")
+        local file_age=$(( now_epoch - file_mtime ))
+        if [ "$file_age" -lt "$cache_ttl_sec" ]; then
+            return 0  # Cache is fresh, reuse it
+        fi
+    fi
+
+    # Attempt to fetch from S3
+    if command -v aws >/dev/null 2>&1; then
+        if aws s3 cp "$s3_uri" "$cache_file" 2>/dev/null; then
+            echo -e "${GREEN}✓ Updated org budget from S3${RESET}" >&2
+            return 0
+        fi
+    fi
+
+    # S3 unreachable — use conservative fallback
+    if [ ! -f "$cache_file" ]; then
+        echo -e "${YELLOW}⚠ S3 unreachable and no cached org policy — using TOKEN_BUDGET=0 (fail-safe)${RESET}" >&2
+        python3 -c "
+import json
+d = {'TOKEN_BUDGET': 0, 'WEEKLY_LIMIT': 0, 'DAILY_BUDGET_PCT': 0}
+with open('$cache_file', 'w') as f:
+    json.dump(d, f)
+" 2>/dev/null || true
+    else
+        local file_age_hours=$(( ($(date +%s) - $(stat -f %m "$cache_file" 2>/dev/null || stat -c %Y "$cache_file" 2>/dev/null)) / 3600 ))
+        echo -e "${YELLOW}⚠ S3 unreachable — using cached budget from ${file_age_hours}h ago${RESET}" >&2
+    fi
+    return 0
+}
+
+# Fetch org policy from S3 (with fallback)
+_fetch_org_policy_from_s3
 
 # ── STEP 2: TOKEN HARNESS ─────────────────────────────────────────────────────
 TODAY=$(date +%Y-%m-%d)
@@ -1007,6 +1148,14 @@ if [ -n "$COMMIT_TREE_FP" ]; then
     echo -e "${GREEN}GATE: receipt written for tree ${COMMIT_TREE_FP:0:12}.${RESET}" >&2
 fi
 
+# Watchdog runs at pre-push only — the natural checkpoint before Claude Code
+# next queries the graph, and cheap enough not to add per-commit overhead.
+# _ensure_graph_freshness (below) already self-heals the crash case whenever
+# THIS run's changed files trigger a rebuild anyway; the watchdog covers the
+# gap where they don't.
+if [ "$GATE_TRIGGER" = "pre-push" ]; then
+    _ensure_graph_alive
+fi
 _ensure_graph_freshness
 
 _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "pass"
