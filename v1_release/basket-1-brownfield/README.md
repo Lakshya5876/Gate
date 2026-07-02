@@ -1,13 +1,12 @@
 # Basket 1 — Brownfield Onboarding
 
-> [!CRITICAL]
-> **🔴 CRITICAL: Paste ONLY the 'SYSTEM PROMPT' section of `v1_implementation_package_existing.md`**
->
-> Do NOT paste the entire document. Locate the section marked "SYSTEM PROMPT" at the top of the file and paste only that into Claude Code. Keep the rest of the document locally for reference.
-
 > [!IMPORTANT]
-> **START HERE: open [`v1_implementation_package_existing.md`](v1_implementation_package_existing.md) and read it end to end before doing anything else.**
-> It contains the pre-flight checklist, the LOC ceiling check, and the exact prompt to paste into Claude Code.
+> **START HERE: after running `install.sh`, open Claude Code and run `/init-governance`.**
+> No file to open, no copy-paste — the installer already generated that command from
+> `v1_implementation_package_existing.md`'s prompt content. Read that file first for the
+> pre-flight checklist and LOC ceiling check, and to see what the command will do before
+> running it; running the command itself does not require opening it. Only paste its
+> prompt section manually if you're on an older install that predates `/init-governance`.
 >
 > The other file — `v1_claude_code_development_guide_existing.md` — is the engineering constitution for **Claude Code to read**, not you.
 > You will copy it into your target repository as it is; the agent internalises it automatically. You do not need to read it yourself.
@@ -47,7 +46,7 @@ with your repository in V1. Contact the platform team for monorepo governance as
 | File | Purpose |
 |---|---|
 | `v1_claude_code_development_guide_existing.md` | The engineering constitution — copy this into your repo root as-is; the init prompt reads it from disk and Claude Code generates `CLAUDE.md` from it |
-| `v1_implementation_package_existing.md` | The one-time init prompt — paste this into Claude Code to run automated repository reconnaissance |
+| `v1_implementation_package_existing.md` | The one-time init prompt — install.sh generates `/init-governance` from this automatically; run that command in Claude Code instead of opening this file |
 
 ## Installation
 
@@ -93,9 +92,10 @@ Open Claude Code (CLI or Desktop app) in your target repository and type:
 ```
 The installer already wrote this command from the exact same prompt content you'd otherwise
 copy-paste — no file to open, no risk of pasting a truncated selection. (If you're on a
-pre-`/init-governance` install, or prefer to read the prompt first: locate the "SYSTEM PROMPT"
-section in `v1_implementation_package_existing.md` and paste **ONLY THAT SECTION** as your first
-message instead — same content, same result. Do not paste the entire document.) Claude Code runs automated reconnaissance,
+pre-`/init-governance` install, or prefer to read the prompt first: in
+`v1_implementation_package_existing.md`, locate the section marked between `PROMPT START`
+and `PROMPT END` and paste **ONLY THAT SECTION** as your first message instead — same
+content, same result. Do not paste the entire document.) Claude Code runs automated reconnaissance,
 maps your architecture, populates the debt baseline, and generates `CLAUDE.md` — one time,
 fully automated.
 

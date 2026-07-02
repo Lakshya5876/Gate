@@ -38,9 +38,16 @@ flows/system design under `docs/` that the scaffold is built to match.
    `defaultMode: "default"`; that pin only protects you if you don't override
    it at the CLI.
 
-## STEP 2 — INITIALIZATION (paste the master prompt)
+## STEP 2 — INITIALIZATION (run /init-governance)
 
-Open Claude Code at the repository root. Paste the entire prompt below verbatim.
+Open Claude Code at the repository root and run:
+```
+/init-governance
+```
+install.sh already generated this command from the exact prompt below — no file
+to open, no copy-paste. (If you're on an install that predates this command, or
+you'd rather read the prompt first: paste the entire marked prompt section below
+verbatim as your first message instead — same content, same result.)
 
 Unlike the brownfield edition there is no existing codebase to discover — instead
 the prompt runs 6 rounds of mandatory questions (product/domain, stack,

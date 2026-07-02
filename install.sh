@@ -10,7 +10,7 @@
 #   5. Builds the initial multi-domain graph
 #   6. Writes .mcp.json (project-scoped, committed — not global settings)
 #   7. Scaffolds org-level token policy if absent
-#   8. Prints the one remaining human step (paste the init prompt)
+#   8. Prints the one remaining human step (run /init-governance)
 #
 # NOTE ON graphify: safishamsi/graphify was evaluated and rejected — unnaturally
 # high star count (68k, likely botted) indicates unverified provenance. Multi-domain
@@ -839,16 +839,20 @@ echo ""
 echo "  1. Open Claude Code in this directory:"
 echo "     claude"
 echo ""
-echo "  2. In ${INIT_PKG_DST}, locate the 'SYSTEM PROMPT' section."
-echo "     Paste ONLY that section as your first message."
-echo "     Claude Code will:"
+echo "  2. Run the init command:"
+echo "     /init-governance"
+echo "     No file to open, no copy-paste — this command already contains the"
+echo "     exact content that used to live in ${INIT_PKG_DST}. Claude Code will:"
+echo "     • Interrogate you (product/stack/risk/debt — several rounds, not one)"
+echo "     • Draft PRD/TRD/DB-schema/user-flows/system-design docs under docs/"
+echo "       and wait for your explicit approval before writing anything else"
 echo "     • Generate CLAUDE.md (repo-specific constitution)"
 echo "     • Generate stack-specific gate.sh commands"
 echo "     • Complete the governance scaffold"
-echo "     • Run Phase C verification"
 echo ""
-echo "  3. Keep ${INIT_PKG_DST} locally for reference — do NOT paste"
-echo "     the entire document, only the SYSTEM PROMPT section."
+echo "  3. ${INIT_PKG_DST} is kept locally too, purely for reference if you'd"
+echo "     rather read the prompt before running it — running /init-governance"
+echo "     does not require opening it."
 echo ""
 echo "  After the init commit, your repo is fully governed."
 echo ""

@@ -76,10 +76,16 @@ agentic engineering environment — without blocking on pre-existing debt.
    package's root — one constitution per package, never one global constitution
    for a monorepo.
 
-## STEP 2 — INITIALIZATION (paste the master prompt)
+## STEP 2 — INITIALIZATION (run /init-governance)
 
-Open Claude Code at the repository (or package) root. Paste the entire prompt
-below verbatim and press Enter.
+Open Claude Code at the repository (or package) root and run:
+```
+/init-governance
+```
+install.sh already generated this command from the exact prompt below — no file
+to open, no copy-paste. (If you're on an install that predates this command, or
+you'd rather read the prompt first: paste the entire marked prompt section below
+verbatim as your first message instead — same content, same result.)
 
 The init runs in TWO halves with a human checkpoint between them:
 - **Half 1 (read-only):** staged reconnaissance → DISCOVERY REPORT. Claude writes

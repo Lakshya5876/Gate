@@ -1,13 +1,12 @@
 # Basket 2 — Greenfield Onboarding
 
-> [!CRITICAL]
-> **🔴 CRITICAL: Paste ONLY the 'SYSTEM PROMPT' section of `v1_implementation_package_new.md`**
->
-> Do NOT paste the entire document. Locate the section marked "SYSTEM PROMPT" at the top of the file and paste only that into Claude Code. Keep the rest of the document locally for reference.
-
 > [!IMPORTANT]
-> **START HERE: open [`v1_implementation_package_new.md`](v1_implementation_package_new.md) and read it end to end before doing anything else.**
-> It contains the pre-flight checklist and the exact prompt to paste into Claude Code to scaffold and govern your new project.
+> **START HERE: after running `install.sh`, open Claude Code and run `/init-governance`.**
+> No file to open, no copy-paste — the installer already generated that command from
+> `v1_implementation_package_new.md`'s prompt content. Read that file first if you want
+> to see what the command will do before running it; running the command itself does
+> not require opening it. Only paste its prompt section manually if you're on an older
+> install that predates `/init-governance`.
 >
 > The other file — `v1_claude_code_development_guide_new.md` — is the engineering constitution for **Claude Code to read**, not you.
 > You will copy it into your new repository as it is; the agent internalises it automatically. You do not need to read it yourself.
@@ -26,7 +25,7 @@ fresh workspaces and scales with the project as it grows.
 | File | Purpose |
 |---|---|
 | `v1_claude_code_development_guide_new.md` | The greenfield engineering constitution — copy this into your repo root as-is; the init prompt reads it from disk and Claude Code generates `CLAUDE.md` from it |
-| `v1_implementation_package_new.md` | The one-time init prompt — paste this into Claude Code to scaffold and govern your new project |
+| `v1_implementation_package_new.md` | The one-time init prompt — install.sh generates `/init-governance` from this automatically; run that command in Claude Code instead of opening this file |
 
 ## Installation
 
@@ -62,9 +61,10 @@ Open Claude Code (CLI or Desktop app) in your new project and type:
 ```
 The installer already wrote this command from the exact same prompt content you'd otherwise
 copy-paste — no file to open, no risk of pasting a truncated selection. (If you're on a
-pre-`/init-governance` install, or prefer to read the prompt first: locate the "SYSTEM PROMPT"
-section in `v1_implementation_package_new.md` and paste **ONLY THAT SECTION** as your first
-message instead — same content, same result.)
+pre-`/init-governance` install, or prefer to read the prompt first: in
+`v1_implementation_package_new.md`, locate the section marked between `PROMPT START` and
+`PROMPT END` and paste **ONLY THAT SECTION** as your first message instead — same content,
+same result.)
 Claude Code will first run 6 rounds of questions (product/domain, stack, operational
 reality, risk posture, debt philosophy, CORE_FILES), then draft a PRD, TRD, DB schema,
 user flows, system design, and architecture-decisions doc under `docs/` and ask you to
