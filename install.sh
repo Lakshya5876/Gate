@@ -22,6 +22,15 @@ set -euo pipefail
 # ── Constants ──────────────────────────────────────────────────────────────────
 FRAMEWORK_VERSION="v1"
 FRAMEWORK_SEMVER="1.0.0"
+# "<version-it-became-obsolete-in>:<path-relative-to-repo-root>"
+# Append one line here whenever a release removes/renames a file this
+# framework owns. _upgrade() (via _offer_deprecated_cleanup) offers to
+# remove anything on this list whose version is newer than the repo's
+# previously-recorded framework_version. Empty today — no release has
+# deprecated anything yet; this is the mechanism for when one does.
+DEPRECATED_SINCE=(
+    # "1.1.0:.claude/hooks/old_thing.sh"
+)
 GRAPH_PACKAGE="code-review-graph==2.3.6"
 ORG_POLICY_PATH="${HOME}/.claude/org_policy.json"
 DEFAULT_WEEKLY_LIMIT=1250000
@@ -37,6 +46,49 @@ _error()   { echo -e "${RED}[install]${RESET} ✗ $*" >&2; exit 1; }
 
 _require() {
     command -v "$1" >/dev/null 2>&1 || _error "$1 is required but not installed. $2"
+}
+
+# _rm and _confirm are intentionally duplicated from uninstall.sh rather than
+# shared — both scripts are meant to be standalone/single-file (same
+# rationale already documented for _check_framework_staleness/
+# _bounded_git_fetch, which are also duplicated). _confirm's case-pattern
+# match (not ${var,,}) is bash-3.2-safe — macOS ships bash 3.2 as /bin/bash
+# by default and does not upgrade it; ${var,,} is bash 4+ only and caused a
+# real crash for a real user before this was caught.
+_rm() {
+    local target="$1"
+    if [ -e "$target" ] || [ -L "$target" ]; then
+        rm -rf "$target"
+        _success "Removed: $target"
+    fi
+}
+
+_confirm() {
+    local answer
+    read -r -p "$1 [y/N] " answer </dev/tty
+    case "$answer" in
+        [Yy]|[Yy][Ee][Ss]) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+_version_lt() {
+    # Usage: _version_lt v1 v2 -> exit 0 if v1 < v2. Pure bash (indexed
+    # arrays + C-style for loops are bash-3.2-safe) — deliberately not
+    # `sort -V`, which is a GNU coreutils extension not available in
+    # macOS's default BSD `sort` (the same class of "assumes a GNU tool"
+    # trap that bit ${var,,} and the `timeout` binary earlier).
+    local IFS=.
+    local -a v1=($1) v2=($2)
+    local i a b
+    for ((i = 0; i < 3; i++)); do
+        a="${v1[i]:-0}"; b="${v2[i]:-0}"
+        case "$a" in ''|*[!0-9]*) a=0 ;; esac
+        case "$b" in ''|*[!0-9]*) b=0 ;; esac
+        [ "$a" -lt "$b" ] && return 0
+        [ "$a" -gt "$b" ] && return 1
+    done
+    return 1
 }
 
 _fetch() {
@@ -431,10 +483,107 @@ _check_framework_staleness() {
     echo ""
 }
 
+_offer_deprecated_cleanup() {
+    # Usage: _offer_deprecated_cleanup <old_framework_version>
+    # Walks DEPRECATED_SINCE, offers to remove anything declared obsolete in
+    # a version newer than the repo's previous one AND still present on
+    # disk. Silent (no prompt at all) when there's nothing to do — preserves
+    # --upgrade's non-interactive default for the common case where nothing
+    # has ever been deprecated.
+    #
+    # The length-check guard below is required, not defensive-programming
+    # excess: under `set -u` (active throughout install.sh), expanding
+    # "${arr[@]}" on a genuinely EMPTY array raises "unbound variable" in
+    # this shell — even though the array itself is declared — while
+    # "${#arr[@]}" (length) does not. DEPRECATED_SINCE is empty by default
+    # (nothing has been deprecated yet), so skipping this check would break
+    # every upgrade until the first entry is ever added.
+    local old_version="$1"
+    [ ${#DEPRECATED_SINCE[@]} -eq 0 ] && return 0
+    local -a found=()
+    local entry ver path
+    for entry in "${DEPRECATED_SINCE[@]}"; do
+        ver="${entry%%:*}"
+        path="${entry#*:}"
+        if _version_lt "$old_version" "$ver" && [ -e "$path" ]; then
+            found+=("$path")
+        fi
+    done
+    [ ${#found[@]} -eq 0 ] && return 0
+    echo ""
+    echo "The following files are obsolete as of this upgrade and can be removed:"
+    local f
+    for f in "${found[@]}"; do echo "  • $f"; done
+    echo ""
+    if _confirm "Remove these obsolete files?"; then
+        for f in "${found[@]}"; do _rm "$f"; done
+    else
+        _warn "Kept obsolete files — remove manually if desired."
+    fi
+}
+
+_write_reconcile_command() {
+    # Usage: _write_reconcile_command <dev_guide_dst> <diff_file>
+    # Same shape as _write_init_command: generates a real slash command
+    # rather than expecting a human to manually diff and merge. Unlike
+    # /init-governance, this one's job is explicitly NOT to regenerate a
+    # file wholesale — CLAUDE.md is human-customized by now, so the command
+    # instructs propose-and-approve edits only, mirroring the same
+    # never-silently-write discipline /init-governance's own Phase A.5
+    # approval gate already established.
+    local dev_guide_dst="$1" diff_file="$2"
+    local diff_content=""
+    [ -f "$diff_file" ] && diff_content=$(cat "$diff_file")
+    python3 - "$dev_guide_dst" "$diff_content" << 'PYEOF'
+import sys
+dev_guide_dst = sys.argv[1]
+diff_content = sys.argv[2]
+description = (
+    "Reconcile CLAUDE.md with a changed engineering-standard source "
+    f"({dev_guide_dst}) — run after install.sh --upgrade reports the dev "
+    "guide's content changed."
+)
+instructions = f"""The engineering constitution's source ({dev_guide_dst}) changed content
+during the last upgrade. CLAUDE.md was NOT touched automatically — it may contain
+significant human-authored decisions by now, and a blind regeneration would lose them.
+
+Read the diff below. For each substantive change (not formatting/wording-only
+changes), propose a specific, individually-justified edit to CLAUDE.md: quote the
+current text, propose the replacement, and give a one-line reason tied to what
+actually changed in the source. Group proposals so each can be approved or
+rejected independently — never present this as one big diff to rubber-stamp.
+
+Do NOT edit CLAUDE.md until at least one proposed edit is explicitly approved.
+Do NOT regenerate CLAUDE.md wholesale under any circumstance — every edit must be
+traceable to a specific change in the diff below, not a fresh read of the whole
+updated guide.
+
+--- DIFF: {dev_guide_dst} (old vs. new) ---
+{diff_content}
+--- END DIFF ---
+"""
+with open('.claude/commands/reconcile-governance.md', 'w') as f:
+    f.write(description + "\n\n" + instructions)
+PYEOF
+}
+
 _upgrade() {
     cd "$REPO_ROOT"
 
     [ -f ".claude/gate_state.json" ] || _error "--upgrade requires an existing governed repo (.claude/gate_state.json not found)."
+
+    # Read BEFORE the version-bump step overwrites it — needed to know which
+    # deprecated-since entries are actually new to this repo (section below).
+    OLD_FRAMEWORK_VERSION=$(python3 -c "
+import json
+try:
+    with open('.claude/gate_state.json') as f:
+        v = json.load(f).get('framework_version')
+    print(v if v else '')
+except Exception:
+    print('')
+" 2>/dev/null)
+    [ -n "$OLD_FRAMEWORK_VERSION" ] || OLD_FRAMEWORK_VERSION="0.0.0"
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -450,12 +599,29 @@ _upgrade() {
     # it existed. Detect basket from whichever dev-guide filename is present —
     # DEV_GUIDE_DST/INIT_PKG_DST aren't set in this flow the way they are in
     # fresh install, since --upgrade never re-runs basket detection.
+    #
+    # CRITICAL: the two _fetch calls at the top of each branch are the fix for
+    # a real bug — _upgrade() previously never refreshed the dev-guide or
+    # init-package files at all, so _write_init_command below was regenerating
+    # /init-governance from whatever content was fetched at the ORIGINAL
+    # install time. An upgrade did not actually update the one-command-init
+    # prompt. OLD_DEV_GUIDE_CONTENT is captured before the overwrite so the
+    # reconciliation check after this block can tell whether the dev guide's
+    # actual content changed, not just its version number.
     if [ -f "v1_claude_code_development_guide_new.md" ]; then
+        OLD_DEV_GUIDE_CONTENT=$(cat "v1_claude_code_development_guide_new.md" 2>/dev/null || echo "")
+        _fetch "v1_release/basket-2-greenfield/v1_claude_code_development_guide_new.md" "v1_claude_code_development_guide_new.md"
+        _fetch "v1_release/basket-2-greenfield/v1_implementation_package_new.md" "v1_implementation_package_new.md"
+        DEV_GUIDE_DST="v1_claude_code_development_guide_new.md"
         _write_trust_root_settings "v1_claude_code_development_guide_new.md" "v1_implementation_package_new.md"
         mkdir -p .claude/commands
         _write_init_command "v1_implementation_package_new.md"
         _write_checkpoint_memory
     elif [ -f "v1_claude_code_development_guide_existing.md" ]; then
+        OLD_DEV_GUIDE_CONTENT=$(cat "v1_claude_code_development_guide_existing.md" 2>/dev/null || echo "")
+        _fetch "v1_release/basket-1-brownfield/v1_claude_code_development_guide_existing.md" "v1_claude_code_development_guide_existing.md"
+        _fetch "v1_release/basket-1-brownfield/v1_implementation_package_existing.md" "v1_implementation_package_existing.md"
+        DEV_GUIDE_DST="v1_claude_code_development_guide_existing.md"
         _write_trust_root_settings "v1_claude_code_development_guide_existing.md" "v1_implementation_package_existing.md"
         mkdir -p .claude/commands
         _write_init_command "v1_implementation_package_existing.md"
@@ -466,6 +632,24 @@ _upgrade() {
     _success "Trust-root settings.json checked/backfilled."
     _success ".claude/commands/init-governance.md checked/backfilled."
     _success "Checkpoint memory checked/backfilled."
+
+    # Constitution reconciliation: if the dev guide's actual CONTENT changed
+    # (not just a version bump that didn't touch it), generate
+    # /reconcile-governance so a human decides what, if anything, to change in
+    # CLAUDE.md — never a silent regeneration. Only runs when there's a real
+    # diff and a detected basket; skips entirely otherwise (no busywork).
+    if [ -n "${DEV_GUIDE_DST:-}" ] && [ -n "${OLD_DEV_GUIDE_CONTENT:-}" ] && [ "$OLD_DEV_GUIDE_CONTENT" != "$(cat "$DEV_GUIDE_DST" 2>/dev/null)" ]; then
+        mkdir -p .claude/commands
+        diff -u <(printf '%s' "$OLD_DEV_GUIDE_CONTENT") "$DEV_GUIDE_DST" > .claude/commands/.reconcile-diff.txt 2>/dev/null || true
+        _write_reconcile_command "$DEV_GUIDE_DST" ".claude/commands/.reconcile-diff.txt"
+        rm -f .claude/commands/.reconcile-diff.txt
+        _success "/reconcile-governance generated — the dev guide's content changed; review before CLAUDE.md drifts further."
+    fi
+
+    # Deprecation cleanup: offer to remove any framework-owned file that
+    # became obsolete in a version newer than this repo's previous one. Only
+    # prints/prompts when there's actually something to remove.
+    _offer_deprecated_cleanup "$OLD_FRAMEWORK_VERSION"
 
     # Re-pin the integrity manifest — must run after every governance script
     # above exists, and unconditionally (not inside the if/elif above), since

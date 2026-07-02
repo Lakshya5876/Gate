@@ -33,25 +33,54 @@ setup_gate_repo() {
 }
 
 extract_install_functions() {
-    # Robustly extracts _write_hooks() and _write_trust_root_settings() from
-    # the REAL install.sh into a sourceable temp file, so tests can run the
-    # actual install-time file-generation logic rather than a hand-copied
-    # mirror of it. Extraction is anchored on function-START markers
-    # (grep -n '^_write_hooks() {'), never on a closing-brace search — the
-    # settings.json heredoc these functions write contains a `}` at column 0
-    # (the JSON object's own closing brace), which breaks any extraction that
-    # searches for `^}$` as an end marker. Start-anchored extraction from
-    # _write_hooks's start line up to (but excluding) _upgrade's start line
-    # is immune to that, since it never looks for a closing brace at all.
+    # Robustly extracts every helper function from _require() through the
+    # line before _upgrade() from the REAL install.sh into a sourceable temp
+    # file, so tests can run the actual install-time file-generation logic
+    # rather than a hand-copied mirror of it. Extraction is anchored on
+    # function-START markers (grep -n '^_require() {'), never on a
+    # closing-brace search — the settings.json heredoc these functions write
+    # contains a `}` at column 0 (the JSON object's own closing brace), which
+    # breaks any extraction that searches for `^}$` as an end marker.
+    # Start-anchored extraction from _require's start line up to (but
+    # excluding) _upgrade's start line is immune to that, since it never
+    # looks for a closing brace at all.
+    #
+    # Anchored at _require (not _write_hooks) specifically so this always
+    # includes every helper added above _write_hooks too (_rm, _confirm,
+    # _version_lt as of this writing) — a prior version anchored at
+    # _write_hooks and silently missed _bounded_git_fetch/
+    # _check_framework_staleness when those were added between _write_hooks
+    # and _upgrade; anchoring at the true top of the helper chain instead of
+    # whatever helper happened to be first when this was written avoids that
+    # class of bug recurring every time a new helper is added.
     local install_sh="${FRAMEWORK_ROOT}/install.sh"
     local start_line end_line
-    start_line=$(grep -n '^_write_hooks() {' "$install_sh" | head -1 | cut -d: -f1)
+    start_line=$(grep -n '^_require() {' "$install_sh" | head -1 | cut -d: -f1)
     end_line=$(grep -n '^_upgrade() {' "$install_sh" | head -1 | cut -d: -f1)
     [ -n "$start_line" ] && [ -n "$end_line" ] || return 1
 
-    EXTRACTED_FUNCS_FILE="$(mktemp "${TMPDIR:-/tmp}/install-funcs-XXXXXX.sh")"
+    # Not mktemp: this machine's mktemp does not substitute the XXXXXX
+    # template for this pattern at all (a real, reproducible environment
+    # quirk found while testing — every call after the first collides with
+    # the same literal "install-funcs-XXXXXX.sh" file with "mkstemp failed:
+    # File exists", since the X's are never actually replaced). $$ (this
+    # process's PID) + $RANDOM gives a uniqueness guarantee that doesn't
+    # depend on the OS's mktemp substitution working correctly at all.
+    EXTRACTED_FUNCS_FILE="${TMPDIR:-/tmp}/install-funcs-$$-${RANDOM}.sh"
+    rm -f "$EXTRACTED_FUNCS_FILE" 2>/dev/null || true
     sed -n "${start_line},$((end_line - 1))p" "$install_sh" > "$EXTRACTED_FUNCS_FILE"
 
+    # shellcheck disable=SC1090
+    source "$EXTRACTED_FUNCS_FILE"
+
+    # Stubs MUST be (re)defined AFTER sourcing, not before — the extracted
+    # range starts at _require, which is BEFORE install.sh's real _fetch
+    # definition. Defining stubs first and sourcing second meant the real
+    # _fetch (which uses install.sh's own $REPO_DIR, never set in a test
+    # context) silently overwrote the test's stub, breaking every test that
+    # calls a function depending on _fetch with "File not found: /templates/...".
+    # Redefining here, last, guarantees the test's versions always win
+    # regardless of what the extracted range happens to contain.
     _success() { :; }
     _warn()    { :; }
     _error()   { echo "[EXTRACTED-ERROR] $*" >&2; return 1; }
@@ -60,8 +89,6 @@ extract_install_functions() {
         local src="$1" dst="$2"
         cp "${FRAMEWORK_ROOT}/${src}" "$dst"
     }
-    # shellcheck disable=SC1090
-    source "$EXTRACTED_FUNCS_FILE"
 }
 
 deploy_bash_guard() {

@@ -3,6 +3,8 @@
 
   "framework_version": "1.0.0",
   "framework_last_upgrade": null,
+  "constitution_source_version": null,
+  "_constitution_source_version_comment": "Set by the init prompt (Phase B) when CLAUDE.md is generated — the framework version the dev guide shipped with at that time. install.sh never writes CLAUDE.md, so it cannot set this itself; --upgrade reads it to know whether a dev-guide content change needs human reconciliation (see /reconcile-governance).",
 
   "last_pass_sha": {},
   "last_pass_timestamp": null,

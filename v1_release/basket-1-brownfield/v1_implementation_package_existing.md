@@ -364,6 +364,14 @@ questions)
   or repairing these files is a human-only action (hand-edit + PR); the agent
   cannot self-repair.
 
+  As part of this same final step, set `constitution_source_version` in
+  `.claude/gate_state.json` to this framework's version (read `install.sh`'s
+  own `FRAMEWORK_SEMVER` constant, or the version noted in
+  `v1_claude_code_development_guide_existing.md` if present). This is how a
+  future `install.sh --upgrade` knows whether the dev guide's content has
+  changed since CLAUDE.md was generated, and whether `/reconcile-governance`
+  needs to run — leaving it null means an upgrade can never detect drift.
+
   C1. CLAUDE.md at the repository root — the DESCRIPTIVE constitution:
       - Architecture enforcement section using the CONFIRMED layer names and
         directories (never invented ones), with each layer's owns / must-not /
