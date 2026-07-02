@@ -370,6 +370,32 @@ else:
 PYEOF
 }
 
+_bounded_git_fetch() {
+    # Usage: _bounded_git_fetch <repo_dir> — a real, hard wall-clock bound on
+    # `git fetch`, with no external `timeout` binary (unavailable by default
+    # on macOS). git's own http.lowSpeedLimit/http.lowSpeedTime only bound
+    # the TRANSFER phase — they do nothing for a slow/hanging DNS lookup or
+    # TCP connect, which is exactly the case that hung for multiple minutes
+    # in testing (no network reachable to the remote at all). Backgrounds
+    # the fetch and polls for up to 5 real wall-clock seconds regardless of
+    # which phase it's stuck in, then kills it. Best-effort: returns
+    # non-zero on timeout or fetch failure, never raises.
+    local repo_dir="$1"
+    GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=5 -C "$repo_dir" fetch --quiet 2>/dev/null &
+    local fetch_pid=$!
+    local waited=0
+    while kill -0 "$fetch_pid" 2>/dev/null && [ "$waited" -lt 5 ]; do
+        sleep 1
+        waited=$((waited + 1))
+    done
+    if kill -0 "$fetch_pid" 2>/dev/null; then
+        kill -9 "$fetch_pid" 2>/dev/null
+        wait "$fetch_pid" 2>/dev/null
+        return 1
+    fi
+    wait "$fetch_pid" 2>/dev/null
+}
+
 _check_framework_staleness() {
     # This framework is meant to be cloned ONCE to a persistent local path
     # (e.g. ~/ai-dev-workflow) and reused across many target repos — nothing
@@ -379,19 +405,21 @@ _check_framework_staleness() {
     # them their clone was behind. Best-effort only: never blocks install,
     # never requires network (silently skips if the fetch fails), and never
     # touches the working tree (fetch only, no pull).
+    #
+    # AI_DEV_WORKFLOW_SKIP_STALENESS_CHECK=1 skips this entirely — for CI,
+    # tests, or offline/sandboxed environments where even a bounded network
+    # attempt is undesirable. _bounded_git_fetch caps the wall-clock cost at
+    # ~5s for a DNS/connect-phase hang, but real-world conditions (a
+    # credential helper prompting the OS keychain, an HTTPS auth handshake
+    # that's slow rather than hung, etc.) can still cost real time that a
+    # test suite or CI run shouldn't have to pay on every single invocation.
+    [ "${AI_DEV_WORKFLOW_SKIP_STALENESS_CHECK:-0}" = "1" ] && return 0
     local repo_dir="$1"
     git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
     local upstream
     upstream=$(git -C "$repo_dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "")
     [ -n "$upstream" ] || return 0
-    # No external `timeout` binary — macOS does not ship GNU coreutils'
-    # timeout by default (the same "assume a GNU tool exists" trap that bit
-    # ${var,,} in uninstall.sh, just for a different tool). git's own
-    # low-speed-abort options give an equivalent bound without depending on
-    # one: abort if the transfer drops below ~1KB/s for 5+ seconds, and
-    # never prompt interactively for credentials (best-effort check, not
-    # worth blocking on an auth prompt).
-    GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=5 -C "$repo_dir" fetch --quiet 2>/dev/null || return 0
+    _bounded_git_fetch "$repo_dir" || return 0
     local behind
     behind=$(git -C "$repo_dir" rev-list --count "HEAD..${upstream}" 2>/dev/null || echo "0")
     case "$behind" in ''|*[!0-9]*) return 0 ;; esac

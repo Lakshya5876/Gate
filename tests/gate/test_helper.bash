@@ -116,6 +116,77 @@ run_ci_integrity_check() {
     bash .githooks/verify_governance_integrity.sh 2>&1
 }
 
+run_with_pty() {
+    # Usage: run_with_pty <script-path> <answer1> [<answer2> ...]
+    # Runs a script under a REAL pty (via Python's pty.fork(), which properly
+    # makes the child a session leader with a controlling terminal — unlike
+    # pty.openpty()+subprocess.Popen, which does not). Needed for anything
+    # that reads confirmation prompts via `</dev/tty` (uninstall.sh's
+    # _confirm): plain stdin piping into a `</dev/tty` read is a no-op, since
+    # that redirect explicitly bypasses stdin — and worse, in a sandboxed/
+    # containerless environment with genuinely no controlling terminal at
+    # all, `/dev/tty` fails to open outright ("Device not configured"),
+    # which `_confirm` treats as an empty answer -> silently declines every
+    # single prompt. A test that pipes into such a script via plain stdin
+    # will "pass" no matter what answers are given, because nothing it
+    # asserts ever reflects a real confirmation — exactly the false-positive
+    # this helper exists to prevent. Echoes combined stdout+stderr, prints
+    # "EXIT_CODE:<n>" as the final line for the caller to parse.
+    local script_path="$1"
+    shift
+    python3 - "$script_path" "$@" << 'PYEOF'
+import pty, os, sys, time, select
+
+script_path = sys.argv[1]
+answers = sys.argv[2:]
+
+pid, fd = pty.fork()
+if pid == 0:
+    os.execvp("/bin/bash", ["/bin/bash", script_path])
+    os._exit(127)
+
+output = b""
+for answer in answers:
+    # Drain whatever the script has printed so far before sending the next
+    # answer — approximates "wait for the next prompt" without depending on
+    # matching specific prompt text.
+    deadline = time.time() + 5
+    while time.time() < deadline:
+        r, _, _ = select.select([fd], [], [], 0.2)
+        if not r:
+            break
+        try:
+            chunk = os.read(fd, 4096)
+        except OSError:
+            break
+        if not chunk:
+            break
+        output += chunk
+    try:
+        os.write(fd, (answer + "\n").encode())
+    except OSError:
+        break
+
+deadline = time.time() + 5
+while time.time() < deadline:
+    r, _, _ = select.select([fd], [], [], 0.3)
+    if not r:
+        break
+    try:
+        chunk = os.read(fd, 4096)
+    except OSError:
+        break
+    if not chunk:
+        break
+    output += chunk
+
+_, status = os.waitpid(pid, 0)
+exit_code = os.WEXITSTATUS(status) if os.WIFEXITED(status) else 1
+sys.stdout.buffer.write(output)
+print(f"\nEXIT_CODE:{exit_code}")
+PYEOF
+}
+
 run_pre_push_hook() {
     # Minimal pre-push bypass-clock logic mirrored from install.sh (for isolated testing).
     # 2>&1: messages go to stderr; redirect so bats `run` captures them in $output.
