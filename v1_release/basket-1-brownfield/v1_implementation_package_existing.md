@@ -384,6 +384,11 @@ questions)
         satisfy the design-declaration requirement, even if tests happen to
         pass; and the Scope Discipline check (Guide §2.5.6a) runs before
         every checkpoint write, not after the diff is already staged
+      - The Blocking Questions rule (Guide §2.5.6b): every HARD STOP and
+        genuine scope fork is surfaced via a structured, blocking question
+        mechanism (e.g. AskUserQuestion), never buried as a sentence inside
+        a longer text response — a hard stop a human can scroll past isn't
+        one
       - The auto-pipeline (recon → contract → execute → output) and the
         commit/push gate including mandatory push confirmation, per Guide §5.3
       - Checkpoint trigger rules C1–C5 and the resume protocol, per Guide §4.1

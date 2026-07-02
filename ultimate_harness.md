@@ -4995,3 +4995,23 @@ Full bats suite: 54/54 (53 passing, 1 gracefully self-skipping for the reason ab
 ### What This Round Adds to the Pattern
 
 Six prior rounds (A6–A11) each closed a gap found by re-examining the same mechanism from a different angle. This round is different in kind: a fresh, wide-scope audit disagreed with the narrow loop's own self-assessment, and the right response wasn't to defend the number or accept it uncritically — it was to verify the *specific, checkable claims* underneath the number, concede the ones that were true (two were, with one of them containing three sub-findings the report itself hadn't even enumerated), and fix them the same way as every prior round: reproduce first, fix, verify against the real artifact, disclose what's still not closed rather than overclaim, document. The score is not the deliverable. The verified state of the code is.
+
+---
+
+## A13. Blocking Questions, Not Buried Ones (2026-07-02)
+
+*Changes made in response to a direct request: a rule ensuring hard-stop and scope-fork questions can't be missed by the human they're addressed to.*
+
+### The Problem
+
+Every prior module in this curriculum — PIPELINE EXCEPTIONS, the Challenge Phase, HARD STOP declarations — establishes *when* the agent must stop and ask a human something. None of them said anything about *how* that question gets delivered. A HARD STOP embedded as the final sentence of a long recon dump, test-output block, or diff summary is easy for a human to miss entirely — attention lands on the most recent visible content, not on parsing every paragraph for a buried question mark. A checkpoint that can be silently scrolled past provides the appearance of a safeguard without its substance.
+
+### The Fix
+
+Added `§2.5.6b "Blocking Questions, Not Buried Ones"` to both development guides, immediately after the Scope Discipline section (§2.5.6a, Module A6). The rule: any HARD STOP or genuine scope-fork question must go through a structured, blocking decision mechanism (e.g. Claude Code's `AskUserQuestion` tool) rather than free text — and if no such mechanism exists in a given environment, the question must be the *entire* message, not the tail end of a longer one, with an explicit statement that execution is paused pending a reply.
+
+This is explicitly scoped to not increase how *often* the agent asks — PIPELINE EXCEPTIONS' "no clarifying questions for everything else" default is untouched. It only changes delivery for the questions that already warranted asking.
+
+**Grounded in an existing precedent, not invented from scratch.** The rule is framed as a generalization of the PUSH CONFIRMATION gate (Guide §5.3), which already requires a push to be confirmed as its own explicit exchange — never inferred from something said earlier in the same message, and never satisfied by a prior unrelated approval. Verified this cross-reference against the actual guide text before writing it, rather than assuming the section existed. Both baskets' implementation packages (§C1/§C2 brownfield, §B2/§B3 greenfield) were updated so every project's generated CLAUDE.md inherits this rule automatically, following the exact carry-forward pattern established for the Scope Discipline and GOAL/VERIFY rules in Module A6.
+
+Pure documentation change — no shell logic touched, so the full bats suite (54/54) was re-run only as a sanity check that nothing else had drifted, not because this change could plausibly affect it.

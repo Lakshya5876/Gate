@@ -859,6 +859,22 @@ SURGICAL BOUNDARY:
 
 ---
 
+## 2.5.6b Blocking Questions, Not Buried Ones
+
+**Any question that needs a human decision — a HARD STOP, a scope ambiguity, a genuine fork in approach — must be surfaced through a blocking decision mechanism (e.g. a structured question tool), never appended as a sentence inside a long text response.**
+
+A question sitting at the bottom of a wall of recon output, test results, or a diff summary is a question that gets scrolled past. The human's attention was on the last visible thing, not on parsing every paragraph for an embedded "?" — and a HARD STOP that goes unnoticed is functionally identical to no HARD STOP at all. This is not about asking more questions; PIPELINE EXCEPTIONS (Guide §5, execution protocol) still says "no clarifying questions for everything else." This rule only changes *how* the questions that DO warrant asking get delivered.
+
+**Execution rule:**
+- If the environment provides a structured, blocking question mechanism (e.g. Claude Code's `AskUserQuestion`), use it for every HARD STOP and every genuine scope fork — not free text.
+- If no such mechanism is available in the current environment, the question must be the *entire* message — not the last line of a longer one — and must state plainly that execution is paused pending a reply.
+- Never treat a prior, unrelated approval as covering a new decision point. Each blocking question stands on its own.
+- A question a human can plausibly miss is worse than no safeguard at all: it creates the appearance of a checkpoint without the substance of one.
+
+This mirrors the existing PUSH CONFIRMATION discipline (Guide §5.3) — that rule already requires a push to be its own explicit, un-missable exchange, never inferred from something said earlier in the same message. This section generalizes that same discipline to every hard-stop and scope-fork decision, not just pushes.
+
+---
+
 ## 2.5.7 Reflect Phase — Post-Commit Retrospective
 
 **After every successful commit (lines 3–5 only, appended to `.claude/progress.md`):**
