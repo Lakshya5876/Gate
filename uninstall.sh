@@ -44,9 +44,17 @@ _rm() {
 }
 
 _confirm() {
+    # ${var,,} (lowercase expansion) is bash 4+ only. macOS ships bash 3.2 as
+    # /bin/bash by default (Apple never ships GPLv3 bash) and does not
+    # upgrade it — most Mac users never install a newer bash via Homebrew,
+    # so this is the common case, not an edge case. Case-insensitive `case`
+    # pattern matching works identically on bash 3.2 and 5.x.
     local answer
     read -r -p "$1 [y/N] " answer </dev/tty
-    [[ "${answer,,}" == "y" || "${answer,,}" == "yes" ]]
+    case "$answer" in
+        [Yy]|[Yy][Ee][Ss]) return 0 ;;
+        *) return 1 ;;
+    esac
 }
 
 # ── Preflight ─────────────────────────────────────────────────────────────────

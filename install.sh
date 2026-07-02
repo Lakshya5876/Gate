@@ -370,6 +370,39 @@ else:
 PYEOF
 }
 
+_check_framework_staleness() {
+    # This framework is meant to be cloned ONCE to a persistent local path
+    # (e.g. ~/ai-dev-workflow) and reused across many target repos — nothing
+    # here auto-updates it. A real user ran an old local clone and got a
+    # confusing "why doesn't /init-governance exist" report, because their
+    # copy predated that feature entirely; install.sh had no way to tell
+    # them their clone was behind. Best-effort only: never blocks install,
+    # never requires network (silently skips if the fetch fails), and never
+    # touches the working tree (fetch only, no pull).
+    local repo_dir="$1"
+    git -C "$repo_dir" rev-parse --git-dir >/dev/null 2>&1 || return 0
+    local upstream
+    upstream=$(git -C "$repo_dir" rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null || echo "")
+    [ -n "$upstream" ] || return 0
+    # No external `timeout` binary — macOS does not ship GNU coreutils'
+    # timeout by default (the same "assume a GNU tool exists" trap that bit
+    # ${var,,} in uninstall.sh, just for a different tool). git's own
+    # low-speed-abort options give an equivalent bound without depending on
+    # one: abort if the transfer drops below ~1KB/s for 5+ seconds, and
+    # never prompt interactively for credentials (best-effort check, not
+    # worth blocking on an auth prompt).
+    GIT_TERMINAL_PROMPT=0 git -c http.lowSpeedLimit=1000 -c http.lowSpeedTime=5 -C "$repo_dir" fetch --quiet 2>/dev/null || return 0
+    local behind
+    behind=$(git -C "$repo_dir" rev-list --count "HEAD..${upstream}" 2>/dev/null || echo "0")
+    case "$behind" in ''|*[!0-9]*) return 0 ;; esac
+    [ "$behind" -gt 0 ] || return 0
+    echo ""
+    echo "⚠ Your local ai-dev-workflow clone (${repo_dir}) is ${behind} commit(s)"
+    echo "  behind ${upstream} — you may be missing recent fixes or features."
+    echo "  Recommended: git -C '${repo_dir}' pull, then re-run this installer."
+    echo ""
+}
+
 _upgrade() {
     cd "$REPO_ROOT"
 
@@ -473,6 +506,8 @@ if [ ! -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_packag
     _error "Framework files not found. Ensure you cloned ai-dev-workflow. Usage: cd <your-target-repo> && /path/to/ai-dev-workflow/install.sh"
 fi
 REPO_DIR="${SCRIPT_DIR}"
+
+_check_framework_staleness "$REPO_DIR"
 
 # ── Argument parsing ──────────────────────────────────────────────────────────
 UPGRADE_MODE=false
