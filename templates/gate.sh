@@ -574,9 +574,31 @@ fi
 
 HEAD_SHA=$(git rev-parse HEAD 2>/dev/null || echo "INIT")
 
-if [ -z "$LAST_SHA" ] || [ "$LAST_SHA" = "null" ] || [ "$LAST_SHA" = "" ]; then
-    echo "GATE: cold start — full scan" >&2
-    CHANGED_FILES=$(git diff --cached --name-only 2>/dev/null)
+# CI has no staged files — a checkout puts the working tree at HEAD with
+# nothing in the index, so "git diff --cached" (the pre-commit/pre-push
+# cold-start path below) is unconditionally empty in CI, regardless of what
+# the PR/push actually changed. That made the CI gate silently pass with
+# zero checks run on every cold-start CI invocation (the common case: new
+# branch, first-time contributor, squashed/rebased history — anything
+# without a matching last_pass_sha). ci-gate.yml sets CI_BASE_SHA (the PR's
+# base sha, or the push's previous HEAD) precisely so this branch can diff
+# against the real base instead. Only trusted for GATE_TRIGGER=ci — a local
+# hook has no such env var and must keep using --cached.
+if [ "$GATE_TRIGGER" = "ci" ] && [ -n "${CI_BASE_SHA:-}" ] && git cat-file -e "${CI_BASE_SHA}^{commit}" 2>/dev/null; then
+    echo "GATE: ci mode — diffing against base ${CI_BASE_SHA}" >&2
+    CHANGED_FILES=$(git diff --name-only "${CI_BASE_SHA}..HEAD" 2>/dev/null)
+    SCAN_MODE="ci-diff"
+elif [ -z "$LAST_SHA" ] || [ "$LAST_SHA" = "null" ] || [ "$LAST_SHA" = "" ]; then
+    if [ "$GATE_TRIGGER" = "ci" ]; then
+        # No usable base (e.g. github.event.before is all-zeros for a
+        # brand-new branch's first push) — fail SAFE by scanning every
+        # tracked file, not fail-open by silently scanning nothing.
+        echo "GATE: ci cold start with no resolvable base SHA — scanning entire tree" >&2
+        CHANGED_FILES=$(git ls-files 2>/dev/null)
+    else
+        echo "GATE: cold start — full scan" >&2
+        CHANGED_FILES=$(git diff --cached --name-only 2>/dev/null)
+    fi
     SCAN_MODE="cold"
 else
     CHANGED_FILES=$(git diff --name-only "${LAST_SHA}..HEAD" 2>/dev/null)
