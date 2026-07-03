@@ -1,0 +1,869 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ai-dev-workflow — Structural AI Governance</title>
+<style>
+  /* ─── Reset & Core Design System ───────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:        #080b10;   /* Deep slate background         */
+    --bg-panel:  #0e131b;   /* Container base                */
+    --bg-card:   #141b25;   /* Elevated visual cards         */
+    --border:    #1f2937;   /* Clean subtle borders          */
+    --border-hi: #374151;   /* Focused borders               */
+    --ink:       #f3f4f6;   /* Primary white text            */
+    --ink-dim:   #9ca3af;   /* Secondary descriptive text    */
+    --ink-muted: #6b7280;   /* Disabled / Captions           */
+    --teal:      #2dd4bf;   /* Core emerald brand accent     */
+    --teal-bg:   rgba(45, 212, 191, 0.05);
+    --teal-dim:  #115e57;   /* Dim teal — badge/border fills */
+    --amber:     #fbbf24;   /* Warnings / Tension states     */
+    --amber-bg:  rgba(251, 191, 36, 0.07);
+    --amber-dim: #5c4318;   /* Dim amber — badge fills       */
+    --red:       #f87171;   /* Failure / Boundary states     */
+    --red-bg:    rgba(248, 113, 113, 0.08);
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, monospace;
+  }
+
+  html { scroll-behavior: smooth; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* Ambient Geometric Mesh Grid Background */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background:
+      radial-gradient(1000px 600px at 80% -15%, rgba(45,212,191,0.07), transparent 70%),
+      radial-gradient(800px 600px at -10% 110%, rgba(248,113,113,0.03), transparent 60%),
+      linear-gradient(transparent 0 39px, rgba(255,255,255,0.008) 39px 40px),
+      linear-gradient(90deg, transparent 0 39px, rgba(255,255,255,0.008) 39px 40px);
+    background-size: auto, auto, 40px 40px, 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  #progress {
+    position: fixed; top: 0; left: 0; height: 3px; width: 0%;
+    background: linear-gradient(90deg, var(--teal), #5eead4);
+    z-index: 100; transition: width .3s ease;
+    box-shadow: 0 0 14px rgba(45,212,191,0.6);
+  }
+
+  .topbar {
+    position: fixed; top: 0; left: 0; right: 0; height: 64px;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 40px; z-index: 90;
+    background: rgba(8, 11, 16, 0.75);
+    backdrop-filter: blur(12px);
+    border-bottom: 1px solid var(--border);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; font-weight: 600; font-size: 14px; letter-spacing: 0.5px; }
+  .brand .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 12px var(--teal); }
+  .brand .mono { font-family: var(--mono); color: var(--ink); }
+  .brand .tag { color: var(--ink-muted); font-weight: 500; font-size: 12px; padding-left: 12px; border-left: 1px solid var(--border-hi); }
+  .counter { font-family: var(--mono); font-size: 12px; color: var(--ink-muted); }
+  .counter b { color: var(--teal); }
+
+  /* ─── Slide Architecture ───────────────────────────────────────────── */
+  main { position: relative; z-index: 1; }
+  .slide {
+    min-height: 100vh;
+    display: flex; flex-direction: column; justify-content: center;
+    padding: 120px 8vw 100px;
+    max-width: 1200px; margin: 0 auto;
+    border-bottom: 1px solid var(--border);
+  }
+  .slide:last-child { border-bottom: none; }
+
+  .kicker {
+    font-family: var(--mono); font-size: 11px; letter-spacing: 3px;
+    text-transform: uppercase; color: var(--teal); margin-bottom: 20px;
+    display: flex; align-items: center; gap: 12px;
+  }
+  .kicker::before { content: ""; width: 30px; height: 1px; background: var(--teal); display: inline-block; }
+
+  h1 { font-size: clamp(36px, 5.5vw, 64px); line-height: 1.05; letter-spacing: -2px; font-weight: 800; }
+  h2 { font-size: clamp(28px, 3.2vw, 42px); line-height: 1.1; letter-spacing: -1px; font-weight: 700; margin-bottom: 12px; }
+  h4 { font-weight: 650; }
+
+  .lede { font-size: clamp(16px, 1.8vw, 20px); color: var(--ink-dim); max-width: 66ch; margin-top: 12px; font-weight: 400; line-height: 1.6; }
+  .highlight { color: var(--ink); font-weight: 600; }
+  .teal { color: var(--teal); }
+  .amber { color: var(--amber); }
+  .red { color: var(--red); }
+  strong { color: var(--ink); font-weight: 650; }
+
+  code {
+    font-family: var(--mono); font-size: 0.85em;
+    background: var(--bg-card); border: 1px solid var(--border);
+    color: #a7f3e4; padding: 1px 6px; border-radius: 5px;
+  }
+
+  hr.rule { border: none; height: 1px; background: var(--border); margin: 40px 0 0; }
+
+  /* Executive ROI banner (Stage 01) */
+  .roi {
+    margin-top: 28px; display: grid; grid-template-columns: auto 1fr; gap: 22px; align-items: start;
+    background: var(--teal-bg); border: 1px solid var(--teal-dim); border-left: 4px solid var(--teal);
+    border-radius: 14px; padding: 22px 26px;
+  }
+  .roi .roi-tag { font-family: var(--mono); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--teal); white-space: nowrap; padding-top: 4px; }
+  .roi p { font-size: 15.5px; color: var(--ink); max-width: none; line-height: 1.55; margin: 0; }
+  .roi p b { color: var(--teal); }
+
+  /* ─── Layout Visual Components ─────────────────────────────────────── */
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 36px; }
+  .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 36px; }
+
+  /* High-contrast Comparison Matrix */
+  .matrix {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 40px;
+  }
+  .matrix-col { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px; padding: 32px; position: relative; }
+  .matrix-col.bad { border-left: 4px solid var(--red); }
+  .matrix-col.good { border-left: 4px solid var(--teal); background: linear-gradient(135deg, var(--bg-panel) 0%, rgba(45,212,191,0.01) 100%); }
+  .matrix-title { font-size: 14px; font-family: var(--mono); letter-spacing: 1px; text-transform: uppercase; margin-bottom: 24px; display: flex; align-items: center; gap: 10px; }
+  .matrix-title .indicator { width: 8px; height: 8px; border-radius: 50%; }
+  .matrix-col.bad .indicator { background: var(--red); box-shadow: 0 0 10px var(--red); }
+  .matrix-col.good .indicator { background: var(--teal); box-shadow: 0 0 10px var(--teal); }
+
+  .matrix-row { padding: 18px 0; border-bottom: 1px solid rgba(255,255,255,0.04); }
+  .matrix-row:last-child { border-bottom: none; padding-bottom: 0; }
+  .matrix-row:first-of-type { padding-top: 0; }
+  .matrix-row h4 { font-size: 17px; font-weight: 600; margin-bottom: 4px; color: var(--ink); }
+  .matrix-row p { font-size: 14px; color: var(--ink-dim); }
+
+  /* Visual Architecture Flow Lineage */
+  .pipeline-flow { display: flex; flex-direction: column; gap: 16px; margin-top: 40px; }
+  .pipeline-card {
+    display: grid; grid-template-columns: 70px 1fr 300px; gap: 32px;
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px; padding: 28px;
+    align-items: center; transition: border-color 0.2s ease;
+  }
+  .pipeline-card:hover { border-color: var(--border-hi); }
+  .pipeline-num {
+    width: 56px; height: 56px; border-radius: 12px; background: rgba(45,212,191,0.06);
+    border: 1px solid var(--teal-dim); display: flex; align-items: center; justify-content: center;
+    font-family: var(--mono); font-weight: 700; font-size: 18px; color: var(--teal);
+  }
+  .pipeline-info h3 { font-size: 19px; font-weight: 650; margin-bottom: 4px; }
+  .pipeline-info p { font-size: 14.5px; color: var(--ink-dim); max-width: 60ch; }
+
+  /* Micro Visual Diagnostics Panels (replacing raw terminal code dumps) */
+  .visual-diag {
+    background: #0b0f16; border: 1px solid var(--border-hi); border-radius: 12px;
+    padding: 20px; font-family: var(--mono); font-size: 13px; color: #93c5fd;
+  }
+  .visual-diag .diag-line { display: flex; gap: 12px; margin-bottom: 8px; align-items: center; }
+  .visual-diag .diag-line:last-child { margin-bottom: 0; }
+  .visual-diag .lbl { color: var(--ink-muted); min-width: 96px; text-transform: uppercase; font-size: 11px; letter-spacing: 0.5px; }
+  .visual-diag .val { color: var(--ink); }
+  .visual-diag .status-badge { padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; }
+  .visual-diag .status-badge.secure { background: var(--teal-dim); color: var(--teal); }
+  .visual-diag .status-badge.alert { background: var(--amber-dim); color: var(--amber); }
+  .visual-diag .status-badge.block { background: #7f1d1d; color: #f87171; }
+
+  /* Verified-code drawer — production snippet beneath a pipeline card */
+  .code-drawer { grid-column: 1 / -1; margin-top: 8px; background: #0a0e13; border: 1px solid var(--border-hi); border-radius: 10px; overflow: hidden; }
+  .code-drawer .cd-head { display: flex; align-items: center; gap: 8px; padding: 9px 14px; border-bottom: 1px solid var(--border); color: var(--ink-muted); font-family: var(--mono); font-size: 11px; letter-spacing: 0.5px; }
+  .code-drawer .cd-head .d { width: 8px; height: 8px; border-radius: 50%; background: var(--border-hi); }
+  .code-drawer .cd-head .path { margin-left: auto; color: var(--ink-muted); }
+  .code-drawer pre { padding: 14px 16px; overflow-x: auto; font-family: var(--mono); font-size: 12.5px; line-height: 1.7; color: #c9d4df; white-space: pre; }
+  .code-drawer .c { color: var(--ink-muted); }
+  .code-drawer .k { color: #7fd1c6; }
+  .code-drawer .s { color: var(--amber); }
+  .code-drawer .g { color: var(--teal); }
+  .code-drawer .b { color: var(--red); font-weight: 600; }
+
+  /* Interactive / Clean Q&A Shield Blocks */
+  .qa-wrapper { display: flex; flex-direction: column; gap: 20px; margin-top: 40px; }
+  .qa-block {
+    background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px; padding: 32px;
+    display: grid; grid-template-columns: 320px 1fr; gap: 40px;
+  }
+  .qa-question { font-size: 20px; font-weight: 700; color: var(--ink); letter-spacing: -0.5px; line-height: 1.3; }
+  .qa-question span { color: var(--teal); font-family: var(--mono); font-size: 16px; margin-right: 8px; display: block; margin-bottom: 6px; }
+  .qa-answer { font-size: 15.5px; color: var(--ink-dim); }
+  .qa-answer p { margin-bottom: 16px; }
+  .qa-answer p:last-child { margin-bottom: 0; }
+
+  .badge-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .badge-tag { font-family: var(--mono); font-size: 12px; padding: 4px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 6px; color: var(--ink-dim); }
+  .badge-tag b { color: var(--teal); }
+
+  /* High Impact Macro Ledger Grid */
+  .macro-ledger { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; margin-top: 40px; }
+  .ledger-box { background: var(--bg-panel); border: 1px solid var(--border); border-radius: 16px; padding: 28px; transition: transform 0.2s ease; }
+  .ledger-box h3 { font-size: 20px; font-weight: 700; margin-bottom: 8px; color: var(--ink); }
+  .ledger-box p { font-size: 14px; color: var(--ink-dim); line-height: 1.5; }
+
+  /* ─── Controls & Navigation ────────────────────────────────────────── */
+  nav.dots { position: fixed; right: 32px; top: 50%; transform: translateY(-50%); z-index: 90; display: flex; flex-direction: column; gap: 16px; }
+  nav.dots a { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--border-hi); background: transparent; transition: all .2s ease; position: relative; }
+  nav.dots a.active { background: var(--teal); border-color: var(--teal); box-shadow: 0 0 12px var(--teal); transform: scale(1.2); }
+  nav.dots a span { position: absolute; right: 24px; top: 50%; transform: translateY(-50%); font-size: 11px; font-family: var(--mono); color: var(--ink-muted); opacity: 0; transition: opacity .15s ease; pointer-events: none; background: var(--bg-panel); border: 1px solid var(--border); padding: 4px 10px; border-radius: 6px; white-space: nowrap; }
+  nav.dots a:hover span { opacity: 1; }
+
+  .controls { position: fixed; bottom: 28px; left: 50%; transform: translateX(-50%); z-index: 90; display: flex; gap: 12px; align-items: center; background: rgba(14, 19, 27, 0.85); backdrop-filter: blur(12px); border: 1px solid var(--border-hi); border-radius: 999px; padding: 8px 12px; box-shadow: 0 8px 32px rgba(0,0,0,0.5); }
+  .controls button { font-family: var(--mono); font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; color: var(--ink-dim); background: transparent; border: none; cursor: pointer; padding: 8px 16px; border-radius: 999px; transition: all .15s ease; }
+  .controls button:hover { background: var(--bg-card); color: var(--ink); }
+  .controls button:disabled { opacity: 0.3; cursor: not-allowed; }
+  .controls button:disabled:hover { background: transparent; color: var(--ink-dim); }
+  .controls .pos { font-family: var(--mono); font-size: 12px; color: var(--ink-muted); padding: 0 8px; border-left: 1px solid var(--border); border-right: 1px solid var(--border); }
+
+  .reveal { opacity: 0; transform: translateY(20px); transition: opacity .5s cubic-bezier(0.16, 1, 0.3, 1), transform .5s cubic-bezier(0.16, 1, 0.3, 1); }
+  .reveal.in { opacity: 1; transform: none; }
+
+  /* ─── Responsive Adjustments ───────────────────────────────────────── */
+  @media (max-width: 960px) {
+    .grid-2, .matrix, .qa-block, .macro-ledger { grid-template-columns: 1fr; }
+    .grid-3 { grid-template-columns: 1fr; }
+    .pipeline-card { grid-template-columns: 1fr; gap: 16px; }
+    .qa-block { gap: 16px; }
+    .roi { grid-template-columns: 1fr; gap: 8px; }
+    nav.dots { display: none; }
+    .slide { padding: 100px 32px 80px; }
+    .brand .tag { display: none; }
+  }
+
+  @media print {
+    .topbar, nav.dots, .controls, #progress, body::before { display: none !important; }
+    .slide { min-height: auto; page-break-after: always; border: none; padding: 40px; }
+    .reveal { opacity: 1 !important; transform: none !important; }
+    body { background: #fff; color: #000; }
+  }
+</style>
+</head>
+<body>
+
+<div id="progress"></div>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="dot"></span>
+    <span class="mono">ai-dev-workflow</span>
+    <span class="tag">Autonomous Agent Control Framework · v1</span>
+  </div>
+  <div class="counter">STAGE <b id="cnum">01</b> / 06</div>
+</header>
+
+<nav class="dots" id="dots">
+  <a href="#s1" data-i="0" class="active"><span>Executive Summary</span></a>
+  <a href="#s2" data-i="1"><span>The Compliance Paradox</span></a>
+  <a href="#s3" data-i="2"><span>The Enforcement Engine</span></a>
+  <a href="#s4" data-i="3"><span>Executive Q&amp;A Shield</span></a>
+  <a href="#s5" data-i="4"><span>Framework Invariants</span></a>
+  <a href="#s6" data-i="5"><span>Get Started</span></a>
+</nav>
+
+<main>
+
+  <!-- ─── 01 · EXECUTIVE SUMMARY ─────────────────────────────────────── -->
+  <section class="slide" id="s1">
+    <div class="reveal">
+      <div class="kicker">00 — Executive Summary</div>
+      <h1>AI Governance and Control <br/>Built for <span class="teal">Deterministic Execution</span>.</h1>
+      <p class="lede">
+        The industry treats AI safety as a prompt-engineering problem. <span class="highlight">ai-dev-workflow</span>
+        treats it as a systems-engineering reality. By moving constraints out of conversational context and
+        anchoring them into operating-system process trees, atomic git ledgers, and a server-side CI backstop,
+        we enforce codebase compliance on the autonomous agent without creating friction for the human engineer.
+      </p>
+
+      <div class="roi">
+        <div class="roi-tag">Executive<br/>Summary</div>
+        <p>
+          <b>The return:</b> ai-dev-workflow converts AI-assisted development from an unbounded liability into a
+          governed, auditable asset. It removes the rework, security exposure, and architectural decay that a
+          drifting autonomous agent introduces — while leaving human engineering velocity untouched — so AI
+          output can scale without scaling cleanup cost, review burden, or audit risk.
+        </p>
+      </div>
+
+      <div class="grid-3" style="margin-top: 32px;">
+        <div class="matrix-col good" style="border-left: none; padding: 24px;">
+          <div style="font-size: 36px; font-weight: 800; color: var(--teal); font-family: var(--mono); letter-spacing: -2px;">&lt; 2s</div>
+          <div style="font-size: 13px; color: var(--ink-dim); margin-top: 4px; font-weight: 500;">Clean incremental human commit, end-to-end</div>
+        </div>
+        <div class="matrix-col good" style="border-left: none; padding: 24px;">
+          <div style="font-size: 36px; font-weight: 800; color: var(--ink); font-family: var(--mono); letter-spacing: -2px;">0</div>
+          <div style="font-size: 13px; color: var(--ink-dim); margin-top: 4px; font-weight: 500;">LLM / network calls inside the gate</div>
+        </div>
+        <div class="matrix-col good" style="border-left: none; padding: 24px;">
+          <div style="font-size: 36px; font-weight: 800; color: var(--teal); font-family: var(--mono); letter-spacing: -2px;">CI</div>
+          <div style="font-size: 13px; color: var(--ink-dim); margin-top: 4px; font-weight: 500;">Server-side backstop mirrors every local gate</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── 02 · THE COMPLIANCE PARADOX ────────────────────────────────── -->
+  <section class="slide" id="s2">
+    <div class="reveal">
+      <div class="kicker">01 — The Structural Problem</div>
+      <h2>The Prompt Compliance Paradox</h2>
+      <p class="lede">
+        Standard frameworks try to manage AI behavior by packing rules into a system prompt. At enterprise
+        scale that breaks down — a model promise is not a security boundary.
+      </p>
+
+      <div class="matrix">
+        <div class="matrix-col bad">
+          <div class="matrix-title"><span class="indicator"></span> Fragile Prompt Restrictions</div>
+
+          <div class="matrix-row">
+            <h4>The Illusion of Compliance</h4>
+            <p>Asking a model to "always follow the layering rules" or "never skip tests" is advisory, not regulatory. Under pressure or long histories, execution becomes unpredictable — and "usually complies" is exactly what a security review will not sign off on.</p>
+          </div>
+
+          <div class="matrix-row">
+            <h4>Context Amnesia</h4>
+            <p>On extended feature branches, large source files and tool output scroll the original rules out of the active context window. The autonomous agent drifts silently and resumes inventing patterns — with no one watching the commit where compliance quietly stopped.</p>
+          </div>
+
+          <div class="matrix-row">
+            <h4>History Contamination</h4>
+            <p>An unconstrained autonomous agent making a blind multi-file change commits it straight into the tree. Broken baseline assumptions bleed into the permanent git log and become what the next session learns from.</p>
+          </div>
+        </div>
+
+        <div class="matrix-col good">
+          <div class="matrix-title"><span class="indicator"></span> ai-dev-workflow System Invariants</div>
+
+          <div class="matrix-row">
+            <h4>Inviolable OS Enforcement</h4>
+            <p>Rules do not depend on the autonomous agent's willingness to listen. Enforcement lives in git hooks, process-tree checks, and shell lifecycles — where the agent has no authority to negotiate, only to comply or be blocked.</p>
+          </div>
+
+          <div class="matrix-row">
+            <h4>Hash-Anchored Disk Constitution</h4>
+            <p>The repository rules live in <code>CLAUDE.md</code>, hash-anchored on disk. When that hash drifts, the gate flags it and requires the agent to re-read the blueprint before proceeding — so architectural context cannot silently decay.</p>
+          </div>
+
+          <div class="matrix-row">
+            <h4>Atomic Commit Barriers</h4>
+            <p>A local gate intercepts the commit before code reaches the ledger. If the autonomous agent attempts a deep structural change footprint with no design brief on disk, the commit is dropped with a hard exit.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── 03 · THE ENFORCEMENT ENGINE ────────────────────────────────── -->
+  <section class="slide" id="s3">
+    <div class="reveal">
+      <div class="kicker">02 — System Architecture</div>
+      <h2>The Enforcement Engine</h2>
+      <p class="lede">
+        Instead of steering model behavior with text, we wrap the local execution boundary in a mechanical
+        runtime cage. Three layers, none of which ask the agent to cooperate.
+      </p>
+
+      <div class="pipeline-flow">
+
+        <div class="pipeline-card">
+          <div class="pipeline-num">01</div>
+          <div class="pipeline-info">
+            <h3>Recursive Process-Tree Lineage Tracing</h3>
+            <p>
+              The gate never trusts an environment variable to say who is committing. On invocation it
+              recursively climbs the OS process tree to <code>PID 1</code>, inspecting each ancestor's command.
+              If the <code>@anthropic-ai/claude-code</code> binary appears anywhere in the lineage, the strict
+              agent gates engage. The human engineer's shell has no such ancestor, so it is waved through with
+              zero friction — and nested subshells cannot mask the autonomous agent, because the walk climbs
+              unconditionally to the root.
+            </p>
+          </div>
+          <div class="visual-diag">
+            <div class="diag-line"><span class="lbl">Lineage</span><span class="val">sh → node → git → gate.sh</span></div>
+            <div class="diag-line"><span class="lbl">Ancestor</span><span class="val">claude-code · PID 8412</span></div>
+            <div class="diag-line"><span class="lbl">Harness</span><span class="val status-badge alert">Agent bound · strict enforce</span></div>
+          </div>
+          <div class="code-drawer">
+            <div class="cd-head"><span class="d"></span> recursive ancestry walk — not just $PPID <span class="path">templates/gate.sh · _is_claude_agent_process()</span></div>
+<pre><span class="c"># A wrapper/multiplexer between claude-code and git only adds parent frames;</span>
+<span class="c"># the loop re-targets each parent in turn, so it still reaches the real ancestor.</span>
+CURRENT_PID=$PPID
+<span class="k">while</span> [ "${CURRENT_PID:-0}" -gt 1 ]; <span class="k">do</span>
+    _AP_CMD=$(ps -p "$CURRENT_PID" -o command=)
+    <span class="k">if</span> echo "$_AP_CMD" | grep -qE <span class="s">'@anthropic-ai/claude-code'</span>; <span class="k">then</span>
+        IS_AGENT=<span class="g">true</span>; <span class="k">break</span>                     <span class="c"># agent caught → strict gates engage</span>
+    <span class="k">fi</span>
+    _AP_PPID=$(ps -p "$CURRENT_PID" -o ppid= | tr -d <span class="s">' \n'</span>)
+    [ -z "$_AP_PPID" ] || [ "$_AP_PPID" = <span class="s">"0"</span> ] &amp;&amp; <span class="k">break</span>   <span class="c"># bounded: terminates at the root</span>
+    CURRENT_PID=$_AP_PPID                            <span class="c"># recurse to the parent frame</span>
+<span class="k">done</span></pre>
+          </div>
+        </div>
+
+        <div class="pipeline-card">
+          <div class="pipeline-num">02</div>
+          <div class="pipeline-info">
+            <h3>Active Kill-and-Restart Graph Lifecycle</h3>
+            <p>
+              The autonomous agent's blast-radius reasoning depends on a current dependency graph; a stale map
+              produces confident, wrong answers. This is not a passive "skip if busy" — it is active termination.
+              During rapid atomic commit flurries, each new commit reads the tracked indexer PID from
+              <code>.claude/graph.pid</code>, force-kills (<code>kill -9</code>) the previous build still mapping
+              an obsolete <code>HEAD</code>, clears the stale PID record, and re-launches a fresh background build
+              against the newest commit. Because exactly one indexer is ever live, two writers never collide on
+              the same SQLite store — eliminating the <code>SQLITE_BUSY</code> errors that plague naive
+              "rebuild on save" setups, while the map always tracks the live <code>HEAD</code>.
+            </p>
+          </div>
+          <div class="visual-diag">
+            <div class="diag-line"><span class="lbl">Tracker</span><span class="val">.claude/graph.pid</span></div>
+            <div class="diag-line"><span class="lbl">Stale build</span><span class="val">PID 9104 → kill -9</span></div>
+            <div class="diag-line"><span class="lbl">Lifecycle</span><span class="val status-badge secure">Re-indexed to HEAD</span></div>
+          </div>
+          <div class="code-drawer">
+            <div class="cd-head"><span class="d"></span> active kill-and-restart — no graceful drop <span class="path">templates/gate.sh · _ensure_graph_freshness()</span></div>
+<pre><span class="c"># Force-terminate the obsolete indexer, clear its PID file, restart on current HEAD.</span>
+<span class="k">if</span> [ -f "$_GF_PID_FILE" ]; <span class="k">then</span>
+    _GF_PID=$(cat "$_GF_PID_FILE" 2&gt;/dev/null)
+    <span class="k">if</span> [ -n "$_GF_PID" ] &amp;&amp; kill -0 "$_GF_PID" 2&gt;/dev/null; <span class="k">then</span>
+        kill -9 "$_GF_PID" 2&gt;/dev/null || true       <span class="c"># hard-stop the stale background build</span>
+    <span class="k">fi</span>
+    rm -f "$_GF_PID_FILE"                             <span class="c"># clear the obsolete PID record</span>
+<span class="k">fi</span>
+nohup bash -c "code-review-graph build &gt;/dev/null 2&gt;&amp;1; rm -f '$_GF_PID_FILE'" &amp;
+echo $! &gt; "$_GF_PID_FILE"                              <span class="c"># track the single live writer for this HEAD</span></pre>
+          </div>
+        </div>
+
+        <div class="pipeline-card">
+          <div class="pipeline-num">03</div>
+          <div class="pipeline-info">
+            <h3>Intolerant Pre-Commit Ledger Walls</h3>
+            <p>
+              When the autonomous agent attempts a Tier-3 footprint — five or more files at once — the commit boundary
+              demands a design checkpoint on disk; if it is missing, the commit is refused outright. The same
+              boundary runs a secrets scan, a layer-isolation check, and an identity-keyed debt ratchet that
+              freezes existing technical debt and hard-blocks any new lint or type finding. Every pass writes a
+              tree-hash receipt that <code>pre-push</code> verifies, so nothing reaches the remote ungated.
+            </p>
+          </div>
+          <div class="visual-diag">
+            <div class="diag-line"><span class="lbl">Staged</span><span class="val">7 files modified</span></div>
+            <div class="diag-line"><span class="lbl">Checkpoint</span><span class="val">LATEST.md missing</span></div>
+            <div class="diag-line"><span class="lbl">Result</span><span class="val status-badge block">Commit aborted · exit 1</span></div>
+          </div>
+          <div class="code-drawer">
+            <div class="cd-head"><span class="d"></span> Tier-3 checkpoint enforcement — agent sessions only <span class="path">templates/gate.sh · STEP 4.4</span></div>
+<pre><span class="c"># Agent commits touching ≥5 files demand a design checkpoint on disk.</span>
+<span class="c"># Human commits: this block is never reached (IS_AGENT=false).</span>
+_is_claude_agent_process
+<span class="k">if</span> [ "$IS_AGENT" = <span class="s">"true"</span> ]; <span class="k">then</span>
+    _T3_COUNT=$(echo "$CHANGED_FILES" | grep -c . 2&gt;/dev/null || echo "0")
+    <span class="k">if</span> [ "${_T3_COUNT:-0}" -ge 5 ] &amp;&amp; [ ! -f <span class="s">".claude/checkpoints/LATEST.md"</span> ]; <span class="k">then</span>
+        echo <span class="s">"PRE-COMMIT BLOCK: Tier-3 footprint with no design checkpoint."</span> &gt;&amp;2
+        <span class="k">exit</span> <span class="b">1</span>                       <span class="c"># agent has no authority to override this</span>
+    <span class="k">fi</span>
+<span class="k">fi</span></pre>
+          </div>
+        </div>
+
+        <div class="pipeline-card">
+          <div class="pipeline-num">04</div>
+          <div class="pipeline-info">
+            <h3>Session Integrity and Forced Handoff</h3>
+            <p>
+              Code quality degrades silently as a session ages — context falls off the attention window
+              and the agent starts reproducing errors it already fixed. Five degradation signals (SD1–SD5)
+              monitor continuously: redundant file reads, repeated past errors, unprompted re-narration of
+              prior steps, uncertainty on previously resolved facts, and session-depth thresholds. When two
+              signals fire simultaneously, the agent is required to write a full state snapshot to
+              <code>.claude/checkpoints/LATEST.md</code> — capturing current phase, git SHA, files touched,
+              decisions locked, and a cold-start RESUME INSTRUCTION — then issue the exact forced handoff
+              message and halt. No further code is written until the human runs <code>/clear</code>.
+              The next session reads <code>LATEST.md</code>, verifies the SHA, and resumes from the
+              RESUME INSTRUCTION with zero context loss.
+            </p>
+          </div>
+          <div class="visual-diag">
+            <div class="diag-line"><span class="lbl">Signals</span><span class="val">SD2 + SD4 active</span></div>
+            <div class="diag-line"><span class="lbl">Action</span><span class="val">LATEST.md written</span></div>
+            <div class="diag-line"><span class="lbl">Status</span><span class="val status-badge alert">Handoff required</span></div>
+          </div>
+          <div class="code-drawer">
+            <div class="cd-head"><span class="d"></span> forced handoff output — verbatim, no paraphrasing <span class="path">CLAUDE.md · Section 10 · FORCED HANDOFF PROTOCOL</span></div>
+<pre><span class="c"># Issued when ≥2 degradation signals are simultaneously active.</span>
+<span class="c"># Agent writes no further code until /clear is confirmed by the human.</span>
+
+<span class="b">CONTEXT SATURATION DETECTED.</span> Code quality will degrade if this
+session continues. To preserve output quality:
+
+  <span class="g">1.</span> Type /clear to flush the session.
+  <span class="g">2.</span> The new session will read LATEST.md and resume from exactly
+     where we stopped — <span class="g">no context is lost.</span>
+
+LATEST.md written: .claude/checkpoints/LATEST.md
+Resume instruction: <span class="k">&lt;RESUME INSTRUCTION verbatim&gt;</span></pre>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── 04 · EXECUTIVE Q&A SHIELD ──────────────────────────────────── -->
+  <section class="slide" id="s4">
+    <div class="reveal">
+      <div class="kicker">03 — De-risking and Governance</div>
+      <h2>Pre-emptive Leadership Q&amp;A</h2>
+      <p class="lede">Resolving velocity, security, and maintenance concerns with the actual mechanism — not a reassurance.</p>
+
+      <div class="qa-wrapper">
+
+        <div class="qa-block">
+          <div class="qa-question">
+            <span>QUESTION 01</span>
+            "If a human clears the gate in two seconds, what stops the agent from just identifying as a human?"
+          </div>
+          <div class="qa-answer">
+            <p>
+              <strong>The pass-through is not a self-declared identity — and the server-side CI is the authority
+              regardless.</strong> The local gate never reads a flag that says "I am human." It inspects the real
+              OS process ancestry; an autonomous agent's commit genuinely carries the <code>claude-code</code>
+              binary as an ancestor, and the agent cannot rewrite its own parent processes from inside its
+              sandbox. "Pretending to be human" is not a move it can make.
+            </p>
+            <p>
+              <strong>And local enforcement does not have to be airtight, because CI is the enforcement of
+              record.</strong> Every push and pull request re-runs the identical <code>gate.sh</code> in a clean
+              server environment — in <code>GATE_TRIGGER=ci</code> mode with tests forced on — no matter who or
+              what produced the commit. Local speed is a convenience for the human engineer (a clean commit
+              clears in <span class="teal">under two seconds</span>, zero network calls); the server is what
+              actually authorizes a merge.
+            </p>
+            <p>
+              That two-second path is also hardened against the failure mode that breaks most git-hook rollouts:
+              the editor deadlock. Before the bypass ever opens an interactive prompt, the hook detects
+              non-interactive IDE and extension shells — testing <code>[ -t 0 ]</code>, <code>/dev/tty</code>
+              readability, and editor markers like <code>TERM_PROGRAM</code> / <code>CURSOR_TRACE_ID</code> — and
+              falls through gracefully instead of hanging the terminal pane. A real terminal gets the prompt; an
+              IDE subshell never freezes.
+            </p>
+            <div class="badge-row">
+              <span class="badge-tag">Process lineage: <b>un-spoofable</b></span>
+              <span class="badge-tag">Final authority: <b>server-side CI</b></span>
+              <span class="badge-tag">IDE shells: <b>no terminal deadlock</b></span>
+              <span class="badge-tag">Human overhead: <b>&lt; 2s</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="qa-block">
+          <div class="qa-question">
+            <span>QUESTION 02</span>
+            "Can a developer just strip the hooks or erase the audit history?"
+          </div>
+          <div class="qa-answer">
+            <p>
+              <strong>No. Local hooks are the fast path; server-side CI is the authority.</strong> If a developer
+              strips <code>.githooks/</code> or pushes with <code>--no-verify</code>, the committed workflow
+              <code>.github/workflows/gate.yml</code> (deployed from <code>templates/ci-gate.yml</code>) still
+              runs: it first verifies the governance files are present and unmodified, then re-executes the same
+              <code>gate.sh</code> in <code>GATE_TRIGGER=ci</code> mode with tests forced on, in a clean
+              environment the developer cannot edit. Any missing file or failed check fails the pipeline.
+            </p>
+            <p>
+              <strong>The emergency bypass is the opposite of Shadow IT — it is the most visible action in the
+              repository.</strong> <code>SKIP_GATE=1</code> requires a typed justification, written to a
+              non-repudiable git note on <code>refs/notes/bypasses</code>, attributed to the author and
+              replicated to the server. It is not a silent escape: the whole platform team sees every bypass via
+              <code>git log --show-notes=bypasses</code> and it surfaces in CI. The <code>pre-push</code> hook
+              rejects force pushes and explicitly blocks any refspec targeting <code>refs/notes/bypasses</code>,
+              so <code>git push origin :refs/notes/bypasses</code> cannot erase the trail. A hard 24-hour
+              resolution clock then <strong>blocks the next push</strong> until the underlying issue is fixed —
+              a bypass is a time-boxed, audited liability, never a permanent override.
+            </p>
+            <div class="badge-row">
+              <span class="badge-tag">CI backstop: <b>gate.yml</b></span>
+              <span class="badge-tag">Every bypass: <b>attributed + visible</b></span>
+              <span class="badge-tag">Unresolved &gt; 24h: <b>push blocked</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="qa-block">
+          <div class="qa-question">
+            <span>QUESTION 03</span>
+            "AI tooling moves fast — how do we prevent configuration and documentation drift?"
+          </div>
+          <div class="qa-answer">
+            <p>
+              <strong>One version-stamped canonical source of truth on disk.</strong> The framework ships two
+              deployment baskets — brownfield (freezes existing debt in a baseline that can only shrink) and
+              greenfield (zero-tolerance from commit one) — that consolidate into a single engineering
+              constitution: <code>CLAUDE.md</code>.
+            </p>
+            <p>
+              Each repo carries a committed <code>.mcp.json</code>, so the moment an engineer clones, their
+              environment inherits the identical graph configuration with zero manual setup. The graph package
+              is pinned to an exact version, and the constitution is hash-anchored — if the rules shift, the gate
+              flags the drift on the next run. Upgrades re-stamp the framework version while preserving every
+              team-owned field.
+            </p>
+            <div class="badge-row">
+              <span class="badge-tag">Canonical rules: <b>CLAUDE.md</b></span>
+              <span class="badge-tag">Zero-config onboarding: <b>committed .mcp.json</b></span>
+              <span class="badge-tag">Supply chain: <b>hash-pinned</b></span>
+            </div>
+          </div>
+        </div>
+
+        <div class="qa-block">
+          <div class="qa-question">
+            <span>QUESTION 04</span>
+            "What if the model writes better code than the governance gate allows?"
+          </div>
+          <div class="qa-answer">
+            <p>
+              <strong>The gate does not judge the creativity of the code — it enforces the safety and
+              architectural boundaries of the system.</strong> Code that is technically superior but
+              architecturally non-compliant is still a long-term maintenance risk, and the gates are precisely
+              what stop that "innovation debt" from entering the codebase.
+            </p>
+            <p>
+              Better ideas are welcome — they simply travel the same human-reviewed path used to change any
+              boundary (updating <code>CLAUDE.md</code> or the <code>core_files</code> policy via PR), rather
+              than being smuggled in by an agent that decided the rule did not apply this time.
+            </p>
+            <div class="badge-row">
+              <span class="badge-tag">Gate scope: <b>safety + architecture</b></span>
+              <span class="badge-tag">Prevents: <b>innovation debt</b></span>
+              <span class="badge-tag">Boundary change: <b>human PR only</b></span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── 05 · FRAMEWORK INVARIANTS ──────────────────────────────────── -->
+  <section class="slide" id="s5">
+    <div class="reveal">
+      <div class="kicker">04 — Core Takeaway</div>
+      <h2>The Bottom Line: Scalable Isolation</h2>
+      <p class="lede">
+        By shifting AI governance out of the chat prompt and into the system environment, the repository becomes
+        an intolerant static-analysis engine — strict on the agent, invisible to the engineer.
+      </p>
+
+      <div class="macro-ledger">
+        <div class="ledger-box" style="border-top: 3px solid var(--teal);">
+          <h3>Zero amnesia</h3>
+          <p>Hash-anchored rules and mandatory checkpoints re-assert architectural alignment across month-long branches.</p>
+        </div>
+        <div class="ledger-box" style="border-top: 3px solid var(--teal);">
+          <h3>Zero blowouts</h3>
+          <p>A weekly token ceiling divided dynamically into daily caps halts runaway agent iterations before the limit is breached; human commits are never blocked.</p>
+        </div>
+        <div class="ledger-box" style="border-top: 3px solid var(--teal);">
+          <h3>Zero mutation</h3>
+          <p>Layer-boundary, complexity, coverage, and debt-ratchet walls catch reckless multi-file commits before they reach the permanent log.</p>
+        </div>
+        <div class="ledger-box" style="border-top: 3px solid var(--teal);">
+          <h3>Zero pollution</h3>
+          <p>Mandatory brainstorm checkpoints and fingerprint receipts keep un-reasoned code out of the permanent log.</p>
+        </div>
+      </div>
+
+      <hr class="rule" />
+
+      <div class="grid-3" style="margin-top: 28px;">
+        <div>
+          <h4 style="font-size:16px; margin-bottom:6px; color:var(--teal); font-family:var(--mono);">MECHANICAL CAGE</h4>
+          <p style="font-size:14px; color:var(--ink-dim);">OS process lineage, background PID control, and atomic git hooks. The agent has no system authority to bypass, negotiate, or rewrite the rules.</p>
+        </div>
+        <div>
+          <h4 style="font-size:16px; margin-bottom:6px; color:var(--teal); font-family:var(--mono);">UNCONSTRAINED VELOCITY</h4>
+          <p style="font-size:14px; color:var(--ink-dim);">The strict gates are lineage-scoped to model execution. Human engineers commit in under two seconds with zero system friction.</p>
+        </div>
+        <div>
+          <h4 style="font-size:16px; margin-bottom:6px; color:var(--teal); font-family:var(--mono);">TOTAL COMPLIANCE</h4>
+          <p style="font-size:14px; color:var(--ink-dim);">Every local gate is mirrored by an authoritative CI run, producing an unalterable, audited timeline of every interaction.</p>
+        </div>
+      </div>
+
+      <div style="margin-top: 56px; display: flex; justify-content: space-between; align-items: center; color: var(--ink-muted); font-family: var(--mono); font-size: 12px; border-top: 1px solid var(--border); padding-top: 20px;">
+        <div>ai-dev-workflow · Enterprise AI Platform Architecture</div>
+        <div>V1 · Production Ready</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── 06 · GET STARTED ────────────────────────────────────────────── -->
+  <section class="slide" id="s6">
+    <div class="reveal">
+      <div class="kicker">05 — Adoption</div>
+      <h2>Get Started in Under Five Minutes</h2>
+      <p class="lede">
+        One installer. One question. Zero manual environment setup. The governance framework
+        is live on your first commit.
+      </p>
+
+      <div class="grid-2" style="margin-top: 40px;">
+
+        <div>
+          <div style="font-size: 11px; font-family: var(--mono); letter-spacing: 3px; text-transform: uppercase; color: var(--teal); margin-bottom: 20px;">Installation</div>
+          <div style="display: flex; flex-direction: column; gap: 12px;">
+
+            <div style="display: flex; gap: 20px; align-items: flex-start; padding: 18px 20px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px;">
+              <div style="width: 28px; height: 28px; border-radius: 8px; background: rgba(45,212,191,0.08); border: 1px solid var(--teal-dim); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: 700; font-size: 12px; color: var(--teal); flex-shrink: 0;">1</div>
+              <div>
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 6px;">Clone the framework once</div>
+                <code style="font-size: 12px; display: block; padding: 6px 10px;">git clone https://github.com/BankofLoyal/ai-dev-workflow ~/ai-dev-workflow</code>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 20px; align-items: flex-start; padding: 18px 20px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px;">
+              <div style="width: 28px; height: 28px; border-radius: 8px; background: rgba(45,212,191,0.08); border: 1px solid var(--teal-dim); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: 700; font-size: 12px; color: var(--teal); flex-shrink: 0;">2</div>
+              <div>
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 6px;">Run the installer from within your repo</div>
+                <code style="font-size: 12px; display: block; padding: 6px 10px;">cd /path/to/your-repo &amp;&amp; ~/ai-dev-workflow/install.sh</code>
+                <div style="font-size: 12px; color: var(--ink-muted); margin-top: 6px;">Asks one question — greenfield or brownfield. Installs hooks, graph server, CI workflow, and org policy automatically.</div>
+              </div>
+            </div>
+
+            <div style="display: flex; gap: 20px; align-items: flex-start; padding: 18px 20px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px;">
+              <div style="width: 28px; height: 28px; border-radius: 8px; background: rgba(45,212,191,0.08); border: 1px solid var(--teal-dim); display: flex; align-items: center; justify-content: center; font-family: var(--mono); font-weight: 700; font-size: 12px; color: var(--teal); flex-shrink: 0;">3</div>
+              <div>
+                <div style="font-size: 14px; font-weight: 600; margin-bottom: 6px;">Open Claude Code and paste the init prompt</div>
+                <code style="font-size: 12px; display: block; padding: 6px 10px;">claude</code>
+                <div style="font-size: 12px; color: var(--ink-muted); margin-top: 6px;">Paste the SYSTEM PROMPT section from the copied implementation package. Claude generates <code>CLAUDE.md</code> and completes the scaffold.</div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+
+          <div>
+            <div style="font-size: 11px; font-family: var(--mono); letter-spacing: 3px; text-transform: uppercase; color: var(--teal); margin-bottom: 20px;">Choose Your Basket</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+              <div style="background: var(--bg-panel); border: 1px solid var(--border); border-top: 3px solid var(--teal); border-radius: 12px; padding: 20px;">
+                <div style="font-size: 13px; font-weight: 700; margin-bottom: 8px;">Greenfield</div>
+                <p style="font-size: 13px; color: var(--ink-dim); line-height: 1.5;">New repository. Zero-tolerance enforcement from commit one. No legacy debt to baseline.</p>
+              </div>
+              <div style="background: var(--bg-panel); border: 1px solid var(--border); border-top: 3px solid var(--amber); border-radius: 12px; padding: 20px;">
+                <div style="font-size: 13px; font-weight: 700; margin-bottom: 8px;">Brownfield</div>
+                <p style="font-size: 13px; color: var(--ink-dim); line-height: 1.5;">Existing codebase. Freezes current debt; hard-blocks only new violations from this point forward.</p>
+              </div>
+            </div>
+          </div>
+
+          <div class="roi" style="margin-top: 0;">
+            <div class="roi-tag">Full<br/>Removal</div>
+            <p>If you ever want to undo everything — hooks, <code>.claude/</code>, <code>.mcp.json</code>, org policy, pipx package — one command removes every trace: <b>~/ai-dev-workflow/uninstall.sh</b>. No residue. No manual cleanup.</p>
+          </div>
+
+          <div style="background: var(--bg-panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px;">
+            <div style="font-size: 11px; font-family: var(--mono); letter-spacing: 2px; text-transform: uppercase; color: var(--teal); margin-bottom: 12px;">After the init commit</div>
+            <div class="badge-row">
+              <span class="badge-tag">Every commit → <b>gate.sh</b></span>
+              <span class="badge-tag">Every push → <b>gate.sh + CI</b></span>
+              <span class="badge-tag">Session start → <b>LATEST.md read</b></span>
+              <span class="badge-tag">Session end → <b>LATEST.md written</b></span>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <div style="margin-top: 56px; display: flex; justify-content: space-between; align-items: center; color: var(--ink-muted); font-family: var(--mono); font-size: 12px; border-top: 1px solid var(--border); padding-top: 20px;">
+        <div>ai-dev-workflow · Enterprise AI Platform Architecture</div>
+        <div>V1 · Production Ready</div>
+      </div>
+    </div>
+  </section>
+
+</main>
+
+<div class="controls">
+  <button id="prev">← Prev</button>
+  <span class="pos" id="pos">01 / 05</span>
+  <button id="next">Next →</button>
+</div>
+
+<script>
+(function () {
+  var slides = Array.prototype.slice.call(document.querySelectorAll('.slide'));
+  var dots   = Array.prototype.slice.call(document.querySelectorAll('#dots a'));
+  var total  = slides.length;
+  var cur    = 0;
+
+  var progress = document.getElementById('progress');
+  var cnum     = document.getElementById('cnum');
+  var pos      = document.getElementById('pos');
+
+  function pad(n) { return (n < 10 ? '0' : '') + n; }
+
+  function setActive(i) {
+    cur = Math.max(0, Math.min(total - 1, i));
+    dots.forEach(function (d, idx) { d.classList.toggle('active', idx === cur); });
+    cnum.textContent = pad(cur + 1);
+    pos.textContent  = pad(cur + 1) + ' / ' + pad(total);
+    progress.style.width = (((cur) / (total - 1)) * 100) + '%';
+    document.getElementById('prev').disabled = (cur === 0);
+    document.getElementById('next').disabled = (cur === total - 1);
+  }
+
+  function goTo(i) {
+    var t = Math.max(0, Math.min(total - 1, i));
+    slides[t].scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  document.getElementById('next').addEventListener('click', function () { goTo(cur + 1); });
+  document.getElementById('prev').addEventListener('click', function () { goTo(cur - 1); });
+
+  document.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowRight' || e.key === 'PageDown') { e.preventDefault(); goTo(cur + 1); }
+    else if (e.key === 'ArrowLeft' || e.key === 'PageUp') { e.preventDefault(); goTo(cur - 1); }
+    else if (e.key === 'Home') { e.preventDefault(); goTo(0); }
+    else if (e.key === 'End')  { e.preventDefault(); goTo(total - 1); }
+  });
+
+  dots.forEach(function (d) {
+    d.addEventListener('click', function (e) {
+      e.preventDefault();
+      goTo(parseInt(d.getAttribute('data-i'), 10));
+    });
+  });
+
+  var io = new IntersectionObserver(function (entries) {
+    entries.forEach(function (en) {
+      if (en.isIntersecting) {
+        var idx = slides.indexOf(en.target);
+        if (idx > -1) setActive(idx);
+        var r = en.target.querySelector('.reveal');
+        if (r) r.classList.add('in');
+      }
+    });
+  }, { threshold: 0.55 });
+
+  slides.forEach(function (s) { io.observe(s); });
+
+  var first = slides[0] && slides[0].querySelector('.reveal');
+  if (first) first.classList.add('in');
+  setActive(0);
+})();
+</script>
+
+</body>
+</html>
