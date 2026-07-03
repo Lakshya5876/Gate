@@ -589,11 +589,22 @@ if [ "$GATE_TRIGGER" = "ci" ] && [ -n "${CI_BASE_SHA:-}" ] && git cat-file -e "$
     CHANGED_FILES=$(git diff --name-only "${CI_BASE_SHA}..HEAD" 2>/dev/null)
     SCAN_MODE="ci-diff"
 elif [ -z "$LAST_SHA" ] || [ "$LAST_SHA" = "null" ] || [ "$LAST_SHA" = "" ]; then
-    if [ "$GATE_TRIGGER" = "ci" ]; then
+    if [ "$GATE_TRIGGER" = "ci" ] || [ "$GATE_TRIGGER" = "pre-push" ]; then
         # No usable base (e.g. github.event.before is all-zeros for a
-        # brand-new branch's first push) — fail SAFE by scanning every
-        # tracked file, not fail-open by silently scanning nothing.
-        echo "GATE: ci cold start with no resolvable base SHA — scanning entire tree" >&2
+        # brand-new branch's first push, or a fresh clone/wiped ledger with
+        # no last_pass_sha recorded for this branch) — fail SAFE by scanning
+        # every tracked file, not fail-open by silently scanning nothing.
+        #
+        # pre-push MUST NOT reuse the `git diff --cached` fallback below: by
+        # the time pre-push runs, the commit has already landed and the index
+        # is clean, so `--cached` is unconditionally empty regardless of what
+        # the push actually contains. That emptiness silently set
+        # HAS_BACKEND/HAS_FRONTEND to false, which skipped lint/type/
+        # complexity/layer-boundary checks entirely on every cold-start push
+        # (new branch, fresh clone, or a wiped gate_state.json ledger) while
+        # still printing "GATE PASS: all checks clean" — found via a real
+        # end-to-end push test, pinned in tests/gate/pre_push_cold_start_scope.bats.
+        echo "GATE: ${GATE_TRIGGER} cold start with no resolvable base — scanning entire tree" >&2
         CHANGED_FILES=$(git ls-files 2>/dev/null)
     else
         echo "GATE: cold start — full scan" >&2
@@ -760,96 +771,186 @@ fi
 # ── Dynamic Stack Inference (§6.0) ───────────────────────────────────────────
 # Infer test runners from repo topology — never default to a static pytest command.
 
-_has_playwright_config() {
-    [ -f "playwright.config.ts" ] || [ -f "playwright.config.js" ] || \
-    [ -f "playwright.config.mjs" ] || \
-    { [ -f "package.json" ] && grep -q '@playwright/test' package.json 2>/dev/null; }
+# Candidate subdirectories checked in addition to the repo root. A repo with
+# a backend/ + frontend/ split (the common brownfield monorepo layout — e.g.
+# backend/requirements.txt, frontend/package.json, nothing at root) otherwise
+# matched none of the root-only manifest checks below, so TEST_RUNNERS stayed
+# empty and every commit hit "no test runner found" until a human manually
+# exported TEST_CMD/FRONTEND_TEST_CMD — despite the layout being extremely
+# common, not an edge case. Found via a real end-to-end install against such
+# a repo, pinned in tests/gate/monorepo_subdir_inference.bats.
+#
+# TEST_CMD_SUBDIRS covers _infer_backend_test_cmd, which (despite the name —
+# it predates the frontend/ split, and also covers generic jest/vitest/
+# npm-test detection) must search frontend subdirs too: a repo's
+# package.json with a "test" script commonly lives under frontend/
+# (jest/vitest unit tests), separate from playwright e2e config.
+# FRONTEND_SUBDIRS alone is used for playwright e2e config discovery
+# (_infer_playwright_cmd) — e2e specs conventionally live in the frontend
+# app directory, not backend/server/api.
+TEST_CMD_SUBDIRS=". backend server api frontend web client ui"
+FRONTEND_SUBDIRS=". frontend web client ui"
+
+_has_playwright_config_in_dir() {
+    local dir="$1"
+    [ -f "${dir}/playwright.config.ts" ] || [ -f "${dir}/playwright.config.js" ] || \
+    [ -f "${dir}/playwright.config.mjs" ] || \
+    { [ -f "${dir}/package.json" ] && grep -q '@playwright/test' "${dir}/package.json" 2>/dev/null; }
 }
 
-_infer_backend_test_cmd() {
-    local changed="$1"
+_has_playwright_config() {
+    local d
+    for d in $FRONTEND_SUBDIRS; do
+        _has_playwright_config_in_dir "$d" && return 0
+    done
+    return 1
+}
+
+# Usage: _scope_to_dir <changed_files> <dir> — files under $dir with the
+# prefix stripped (so they're valid relative paths once the runner itself
+# `cd`s into $dir); ".": passthrough unchanged.
+_scope_to_dir() {
+    local changed="$1" dir="$2"
+    if [ "$dir" = "." ]; then
+        echo "$changed"
+    else
+        echo "$changed" | grep -E "^${dir}/" | sed "s|^${dir}/||"
+    fi
+}
+
+# Usage: _wrap_in_dir <cmd> <dir> — a root-relative command runs as-is; a
+# subdirectory command is wrapped in a subshell `cd` so its own relative
+# file arguments (already stripped by _scope_to_dir) resolve correctly.
+_wrap_in_dir() {
+    local cmd="$1" dir="$2"
+    if [ "$dir" = "." ]; then
+        echo "$cmd"
+    else
+        echo "(cd '${dir}' && ${cmd})"
+    fi
+}
+
+# Usage: _dirjoin <dir> <name> — "." + "x" -> "x" (not "./x"); "backend" + "x"
+# -> "backend/x". A plain top-level helper (not a per-call closure) so it
+# doesn't redefine a global function named after a single generic letter on
+# every invocation of the callers below.
+_dirjoin() {
+    if [ "$1" = "." ]; then
+        echo "$2"
+    else
+        echo "$1/$2"
+    fi
+}
+
+_infer_backend_test_cmd_in_dir() {
+    local changed="$1" dir="$2"
     local py_changed go_changed js_changed
 
     # Python: pytest via config manifests
-    if [ -f "pytest.ini" ] || [ -f "conftest.py" ] || \
-       { [ -f "pyproject.toml" ] && grep -q '\[tool\.pytest' pyproject.toml 2>/dev/null; } || \
-       { [ -f "setup.cfg" ] && grep -q '\[tool:pytest\]' setup.cfg 2>/dev/null; } || \
-       { ls requirements*.txt >/dev/null 2>&1 && grep -qE '^pytest' requirements*.txt 2>/dev/null; }; then
-        py_changed=$(echo "$changed" | grep -E '\.py$' | tr '\n' ' ' || true)
+    if [ -f "$(_dirjoin "$dir" pytest.ini)" ] || [ -f "$(_dirjoin "$dir" conftest.py)" ] || \
+       { [ -f "$(_dirjoin "$dir" pyproject.toml)" ] && grep -q '\[tool\.pytest' "$(_dirjoin "$dir" pyproject.toml)" 2>/dev/null; } || \
+       { [ -f "$(_dirjoin "$dir" setup.cfg)" ] && grep -q '\[tool:pytest\]' "$(_dirjoin "$dir" setup.cfg)" 2>/dev/null; } || \
+       { ls "$(_dirjoin "$dir" requirements)"*.txt >/dev/null 2>&1 && grep -qE '^pytest' "$(_dirjoin "$dir" requirements)"*.txt 2>/dev/null; }; then
+        py_changed=$(_scope_to_dir "$changed" "$dir" | grep -E '\.py$' | tr '\n' ' ' || true)
         if [ -n "$py_changed" ]; then
-            echo "pytest -x -q --tb=short ${py_changed} 2>&1 | head -100"
+            _wrap_in_dir "pytest -x -q --tb=short ${py_changed} 2>&1 | head -100" "$dir"
         else
-            echo "pytest -x -q --tb=short 2>&1 | head -100"
+            _wrap_in_dir "pytest -x -q --tb=short 2>&1 | head -100" "$dir"
         fi
         return 0
     fi
 
     # Node/JS: jest, vitest, or npm test script
-    if [ -f "package.json" ]; then
-        js_changed=$(echo "$changed" | grep -E '\.(ts|tsx|js|jsx)$' | tr '\n' ' ' || true)
-        if grep -q '"jest"' package.json 2>/dev/null || \
-           grep -qE '"test".*jest' package.json 2>/dev/null; then
+    if [ -f "$(_dirjoin "$dir" package.json)" ]; then
+        js_changed=$(_scope_to_dir "$changed" "$dir" | grep -E '\.(ts|tsx|js|jsx)$' | tr '\n' ' ' || true)
+        if grep -q '"jest"' "$(_dirjoin "$dir" package.json)" 2>/dev/null || \
+           grep -qE '"test".*jest' "$(_dirjoin "$dir" package.json)" 2>/dev/null; then
             if [ -n "$js_changed" ]; then
-                echo "npm test -- --passWithNoTests --findRelatedTests ${js_changed} 2>&1 | head -100"
+                _wrap_in_dir "npm test -- --passWithNoTests --findRelatedTests ${js_changed} 2>&1 | head -100" "$dir"
             else
-                echo "npm test -- --passWithNoTests 2>&1 | head -100"
+                _wrap_in_dir "npm test -- --passWithNoTests 2>&1 | head -100" "$dir"
             fi
             return 0
-        elif grep -q 'vitest' package.json 2>/dev/null; then
-            echo "npx vitest run --passWithNoTests 2>&1 | head -100"
+        elif grep -q 'vitest' "$(_dirjoin "$dir" package.json)" 2>/dev/null; then
+            _wrap_in_dir "npx vitest run --passWithNoTests 2>&1 | head -100" "$dir"
             return 0
-        elif grep -q '"test"' package.json 2>/dev/null; then
-            echo "npm test 2>&1 | head -100"
+        elif grep -q '"test"' "$(_dirjoin "$dir" package.json)" 2>/dev/null; then
+            _wrap_in_dir "npm test 2>&1 | head -100" "$dir"
             return 0
         fi
     fi
 
     # Go
-    if [ -f "go.mod" ]; then
-        go_changed=$(echo "$changed" | grep -E '\.go$' | while read -r f; do dirname "$f"; done 2>/dev/null | sort -u | sed 's|^|./|' | tr '\n' ' ' || true)
+    if [ -f "$(_dirjoin "$dir" go.mod)" ]; then
+        go_changed=$(_scope_to_dir "$changed" "$dir" | grep -E '\.go$' | while read -r f; do dirname "$f"; done 2>/dev/null | sort -u | sed 's|^|./|' | tr '\n' ' ' || true)
         if [ -n "$go_changed" ]; then
-            echo "go test ${go_changed} -count=1 2>&1 | head -100"
+            _wrap_in_dir "go test ${go_changed} -count=1 2>&1 | head -100" "$dir"
         else
-            echo "go test ./... -count=1 2>&1 | head -100"
+            _wrap_in_dir "go test ./... -count=1 2>&1 | head -100" "$dir"
         fi
         return 0
     fi
 
     # Rust
-    if [ -f "Cargo.toml" ]; then
-        echo "cargo test --quiet 2>&1 | head -100"
+    if [ -f "$(_dirjoin "$dir" Cargo.toml)" ]; then
+        _wrap_in_dir "cargo test --quiet 2>&1 | head -100" "$dir"
         return 0
     fi
 
     # Java/Kotlin — Maven or Gradle
-    if [ -f "pom.xml" ]; then
-        echo "mvn -q test 2>&1 | head -100"
+    if [ -f "$(_dirjoin "$dir" pom.xml)" ]; then
+        _wrap_in_dir "mvn -q test 2>&1 | head -100" "$dir"
         return 0
     fi
-    if [ -f "build.gradle" ] || [ -f "build.gradle.kts" ]; then
-        echo "./gradlew test --quiet 2>&1 | head -100"
+    if [ -f "$(_dirjoin "$dir" build.gradle)" ] || [ -f "$(_dirjoin "$dir" build.gradle.kts)" ]; then
+        _wrap_in_dir "./gradlew test --quiet 2>&1 | head -100" "$dir"
         return 0
     fi
 
     echo ""
 }
 
-_infer_playwright_cmd() {
-    local changed="$1"
-    if ! _has_playwright_config; then
+_infer_backend_test_cmd() {
+    local changed="$1" dir cmd
+    for dir in $TEST_CMD_SUBDIRS; do
+        cmd=$(_infer_backend_test_cmd_in_dir "$changed" "$dir")
+        if [ -n "$cmd" ]; then
+            echo "$cmd"
+            return 0
+        fi
+    done
+    echo ""
+}
+
+_infer_playwright_cmd_in_dir() {
+    local changed="$1" dir="$2"
+    if ! _has_playwright_config_in_dir "$dir"; then
         echo ""
         return 0
     fi
-    local pw_specs ui_touched
-    pw_specs=$(echo "$changed" | grep -E '\.(spec|e2e)\.(ts|js|mjs)$|/e2e/' | tr '\n' ' ' || true)
+    local scoped pw_specs ui_touched
+    scoped=$(_scope_to_dir "$changed" "$dir")
+    pw_specs=$(echo "$scoped" | grep -E '\.(spec|e2e)\.(ts|js|mjs)$|/e2e/' | tr '\n' ' ' || true)
     if [ -n "$pw_specs" ]; then
-        echo "npx playwright test ${pw_specs} 2>&1 | head -100"
+        _wrap_in_dir "npx playwright test ${pw_specs} 2>&1 | head -100" "$dir"
     else
-        ui_touched=$(echo "$changed" | grep -E '(routes/|pages/|components/|frontend/|presentation/|\.tsx$|\.jsx$|nginx\.conf|proxy)' || true)
-        if [ -n "$ui_touched" ] || [ -n "$changed" ]; then
-            echo "npx playwright test 2>&1 | head -100"
+        ui_touched=$(echo "$scoped" | grep -E '(routes/|pages/|components/|frontend/|presentation/|\.tsx$|\.jsx$|nginx\.conf|proxy)' || true)
+        if [ -n "$ui_touched" ] || { [ "$dir" != "." ] && [ -n "$scoped" ]; } || { [ "$dir" = "." ] && [ -n "$changed" ]; }; then
+            _wrap_in_dir "npx playwright test 2>&1 | head -100" "$dir"
         fi
     fi
+}
+
+_infer_playwright_cmd() {
+    local changed="$1" dir cmd
+    for dir in $FRONTEND_SUBDIRS; do
+        cmd=$(_infer_playwright_cmd_in_dir "$changed" "$dir")
+        if [ -n "$cmd" ]; then
+            echo "$cmd"
+            return 0
+        fi
+    done
+    echo ""
 }
 
 # Build execution queue: init overrides first, then inferred runners.
@@ -994,9 +1095,18 @@ fi
 
 # ── STEP 6.5: LAYER BOUNDARY SCAN ────────────────────────────────────────────
 # Heuristic grep scan scoped to CHANGED_FILES only (never full-repo).
-# Catches the two most common AI-generated layer violations:
+# Catches the three most common AI-generated layer violations:
 #   1. SQL in presentation/routes layer (belongs only in repositories/)
 #   2. HTTP framework imports in application/services layer (belongs only in routes/)
+#   3. ORM/framework/infrastructure imports in the domain/entities layer (belongs
+#      only in infrastructure/) — the domain layer is supposed to be pure
+#      business logic with zero external dependencies (Clean Architecture's
+#      innermost ring). A prior version of this scan only checked cross-layer
+#      SQL/HTTP leakage and had no notion of "any framework" at all, so a
+#      domain entity directly importing sqlalchemy committed cleanly even
+#      though CLAUDE.md is explicit that this is exactly the violation the
+#      four-layer scaffold exists to prevent — found via a real end-to-end
+#      commit test, pinned in tests/gate/layer_boundary_domain_purity.bats.
 # Fires only if changed files land in known layer directories — stack-agnostic.
 if $HAS_BACKEND && [ -n "$CHANGED_FILES" ]; then
     LAYER_VIOLATIONS=""
@@ -1038,12 +1148,32 @@ if $HAS_BACKEND && [ -n "$CHANGED_FILES" ]; then
                 LAYER_VIOLATIONS="${LAYER_VIOLATIONS}SERVICE_HAS_HTTP ${_lf}:\n${_HTTP}\n"
             fi
         fi
+
+        # Domain / entities layer: must import NOTHING from an ORM, HTTP
+        # framework, or infrastructure/driver package — pure business logic
+        # only. Deliberately excludes bare "models?/" as a directory trigger:
+        # that name is also commonly used FOR ORM model definitions
+        # themselves (infrastructure concern), so matching it here would
+        # false-positive on the very files meant to contain these imports.
+        if echo "$_lf" | grep -qiE '/(domain|entities)/'; then
+            # Python: ORM, HTTP framework, and raw infra-driver imports
+            _FW=$(grep -nE '^[[:space:]]*(from|import)[[:space:]]+(sqlalchemy|django\.(db|contrib)|peewee|tortoise|sqlmodel|pymongo|psycopg2|redis|boto3|requests|httpx|fastapi|flask|celery)\b' "$_lf" 2>/dev/null | grep -v '^\s*#' | head -5 || true)
+            # Java/Spring: JPA/Hibernate annotations, Spring stereotypes leaking into domain
+            _FW_JAVA=$(grep -nE '(javax\.persistence|jakarta\.persistence|org\.hibernate|org\.springframework\.(stereotype|web)|@Entity\b|@Table\b|@Column\b|@RestController|@Repository)' "$_lf" 2>/dev/null | grep -v '^\s*//' | head -5 || true)
+            # JS/TS: common ORM/HTTP imports leaking into domain
+            _FW_JS=$(grep -nE "(from ['\"](typeorm|@prisma/client|sequelize|mongoose|express|fastify)['\"])" "$_lf" 2>/dev/null | head -5 || true)
+            _FW="${_FW}${_FW_JAVA}${_FW_JS}"
+            if [ -n "$_FW" ]; then
+                LAYER_VIOLATIONS="${LAYER_VIOLATIONS}DOMAIN_HAS_FRAMEWORK_IMPORT ${_lf}:\n${_FW}\n"
+            fi
+        fi
     done <<< "$CHANGED_FILES"
 
     if [ -n "$LAYER_VIOLATIONS" ]; then
         echo -e "${RED}GATE BLOCK: Layer boundary violation(s) detected in changed files:${RESET}" >&2
         echo -e "$LAYER_VIOLATIONS" | head -40 >&2
         echo "SQL belongs in repositories/ only. HTTP framework imports belong in routes/ only." >&2
+        echo "The domain/entities layer must have zero ORM/HTTP/infrastructure imports." >&2
         echo "Move the violating code to the correct layer before committing." >&2
         OUTCOME="block:layer-boundary"
         _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "$OUTCOME"
@@ -1079,7 +1209,16 @@ _run_test_queue() {
     return 0
 }
 
+# TESTS_RAN feeds the final "GATE PASS" summary line's tests= field — a
+# corner-cutting engineer reading only that one final line (not the full
+# scrollback) would otherwise see "GATE PASS: all checks clean" with no
+# mechanical signal that pre-commit's tests are opt-in and were, in fact,
+# never executed on this run. The "GATE: tests opt-in..." message above
+# already says so, but it's easy to miss mid-scrollback; putting it on the
+# terminal PASS line itself makes it unmissable.
+TESTS_RAN="none"
 if [ "$RUN_TESTS" = "true" ] && [ ${#TEST_RUNNERS[@]} -gt 0 ]; then
+    TESTS_RAN="ran"
     echo "GATE: running ${#TEST_RUNNERS[@]} test suite(s) (coverage threshold: ${COVERAGE_THRESHOLD}%)..." >&2
     if ! _run_test_queue; then
         OUTCOME="block:tests"
@@ -1114,6 +1253,7 @@ if [ "$RUN_TESTS" = "true" ] && [ ${#TEST_RUNNERS[@]} -gt 0 ]; then
         _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "warn:no_coverage_cmd"
     fi
 elif [ "$RUN_TESTS" != "true" ] && [ ${#TEST_RUNNERS[@]} -gt 0 ]; then
+    TESTS_RAN="skipped"
     echo "GATE: tests opt-in at pre-commit (--run-tests=false). Mandatory at pre-push and on CORE_FILES changes." >&2
     echo "GATE: queued runners (not executed): ${TEST_RUNNERS[*]}" >&2
 fi
@@ -1182,5 +1322,5 @@ _ensure_graph_freshness
 
 _json_append_audit "$NOW_ISO" "$GATE_TRIGGER" "$TOTAL_SPENT" "pass"
 
-echo -e "${GREEN}GATE PASS: all checks clean | branch=${CURRENT_BRANCH} | mode=${SCAN_MODE} | tier3=${CORE_FILES_TOUCHED} | token=${TOTAL_SPENT}/${TOKEN_BUDGET}${RESET}" >&2
+echo -e "${GREEN}GATE PASS: all checks clean | branch=${CURRENT_BRANCH} | mode=${SCAN_MODE} | tier3=${CORE_FILES_TOUCHED} | tests=${TESTS_RAN} | token=${TOTAL_SPENT}/${TOKEN_BUDGET}${RESET}" >&2
 exit 0

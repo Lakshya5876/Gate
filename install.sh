@@ -176,6 +176,25 @@ import json, sys, os
 
 dev_guide_dst, init_pkg_dst = sys.argv[1], sys.argv[2]
 
+# Every hook command below is registered as a bare repo-root-relative path
+# (e.g. "bash .claude/hooks/..."). Claude Code's Bash tool persists cwd
+# across calls within a session, so an agent running `cd backend && ...`
+# leaves every SUBSEQUENT hook invocation (this one included) launched with
+# cwd=backend/ — at which point "python3 .claude/checkpoint_tool.py ..." or
+# "bash .claude/hooks/pre_bash_trust_root_guard.sh" can't find its own file
+# and either throws a raw Python traceback or a shell "No such file or
+# directory" straight into the transcript instead of doing its job. `git
+# rev-parse --show-toplevel` still resolves correctly from any subdirectory
+# of the same working tree, so anchoring every hook command to it makes
+# hook execution cwd-independent regardless of what the triggering tool call
+# changed directory to. Falls back to the current directory (`pwd`) outside
+# a git repo so the anchor itself never becomes the failure. Prepended as
+# plain text, not baked into a helper var referenced elsewhere, so each
+# hook's "command" is trivially greppable for its target script name — the
+# dedup checks below match on substring, and the anchor prefix doesn't
+# change what substring is present.
+_ANCHOR = 'cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && '
+
 REQUIRED_DENY = [
     "Bash(git reset --hard*)", "Bash(git rebase*)", "Bash(git clean*)",
     "Bash(rm -rf*)", "Bash(sudo*)", "Bash(DROP *)", "Bash(TRUNCATE *)",
@@ -217,7 +236,7 @@ REQUIRED_DENY = [
 
 BASH_GUARD_HOOK_ENTRY = {
     "matcher": "Bash",
-    "hooks": [{"type": "command", "command": "bash .claude/hooks/pre_bash_trust_root_guard.sh"}]
+    "hooks": [{"type": "command", "command": _ANCHOR + "bash .claude/hooks/pre_bash_trust_root_guard.sh"}]
 }
 # Matches every tool the code-review-graph MCP server exposes
 # (mcp__<server-name>__<tool-name> is Claude Code's MCP tool-naming
@@ -225,7 +244,7 @@ BASH_GUARD_HOOK_ENTRY = {
 # future tool the server adds is covered without an install.sh change.
 GRAPH_FRESHNESS_HOOK_ENTRY = {
     "matcher": "mcp__code-review-graph__.*",
-    "hooks": [{"type": "command", "command": "python3 .claude/hooks/graph_freshness_check.py"}]
+    "hooks": [{"type": "command", "command": _ANCHOR + "python3 .claude/hooks/graph_freshness_check.py"}]
 }
 
 if os.path.exists('.claude/settings.json'):
@@ -362,22 +381,30 @@ _write_checkpoint_memory() {
     python3 << 'PYEOF'
 import json, os
 
+# See _write_trust_root_settings's _ANCHOR for the full rationale: every hook
+# command here is a bare repo-root-relative path, and Claude Code's Bash
+# tool persists cwd across calls — a `cd backend && ...` call leaves this
+# exact hook launched from backend/ on every subsequent invocation, unable
+# to find .claude/checkpoint_tool.py. `git rev-parse --show-toplevel` still
+# resolves from any subdirectory of the same working tree.
+_ANCHOR = 'cd "$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && '
+
 CHECKPOINT_HOOKS = {
     "SessionStart": {
         "matcher": "startup|resume|clear|compact",
-        "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-session-start"}],
+        "hooks": [{"type": "command", "command": _ANCHOR + "python3 .claude/checkpoint_tool.py hook-session-start"}],
     },
     "PreCompact": {
         "matcher": "*",
-        "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-pre-compact"}],
+        "hooks": [{"type": "command", "command": _ANCHOR + "python3 .claude/checkpoint_tool.py hook-pre-compact"}],
     },
     "Stop": {
-        "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-stop"}],
+        "hooks": [{"type": "command", "command": _ANCHOR + "python3 .claude/checkpoint_tool.py hook-stop"}],
     },
 }
 POST_TOOL_HOOKS = [
-    {"matcher": "Bash", "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-post-bash"}]},
-    {"matcher": "Write|Edit|MultiEdit", "hooks": [{"type": "command", "command": "python3 .claude/checkpoint_tool.py hook-post-write"}]},
+    {"matcher": "Bash", "hooks": [{"type": "command", "command": _ANCHOR + "python3 .claude/checkpoint_tool.py hook-post-bash"}]},
+    {"matcher": "Write|Edit|MultiEdit", "hooks": [{"type": "command", "command": _ANCHOR + "python3 .claude/checkpoint_tool.py hook-post-write"}]},
 ]
 
 if not os.path.exists('.claude/settings.json'):
@@ -890,6 +917,38 @@ else
     _warn ".github/workflows/gate.yml already exists — left unchanged. Compare against templates/ci-gate.yml manually."
 fi
 
+# ── STEP 4d: CODEOWNERS starter file ─────────────────────────────────────────
+# docs/SECURITY_POSTURE.md and the implementation package are explicit that
+# closing the "CI verifies internal self-consistency, not an externally-
+# trusted reference" gap requires a human-controlled GitHub setting
+# (CODEOWNERS + a branch-protection rule requiring Code Owner review) that
+# install.sh cannot activate on its own — GitHub's branch-protection API call
+# needs repo-admin credentials this script never has. That's still true; this
+# does NOT flip branch protection on. What was missing is scaffolding: the
+# mission brief and the implementation package both expect
+# .github/CODEOWNERS to exist, but install.sh never wrote one, leaving a
+# human to hand-transcribe the exact path list from the guide instead of
+# just filling in a team name. Never overwrites an existing CODEOWNERS —
+# a human may already have real content there.
+if [ ! -f ".github/CODEOWNERS" ]; then
+    cat > .github/CODEOWNERS << 'CODEOWNERS_EOF'
+# Governance trust-root — requires Code Owner review before merge.
+# Scaffolded by install.sh; replace @your-org/platform-team with a real
+# team/user, then enable "Require review from Code Owners" on this repo's
+# default-branch protection rule (Settings -> Branches). CODEOWNERS alone is
+# advisory — GitHub does not enforce it without that branch protection rule.
+/.githooks/                         @your-org/platform-team
+/.claude/gate_integrity.sha256      @your-org/platform-team
+/.claude/hooks/                     @your-org/platform-team
+/.claude/settings.json              @your-org/platform-team
+/.github/workflows/gate.yml         @your-org/platform-team
+/CLAUDE.md                          @your-org/platform-team
+CODEOWNERS_EOF
+    _success ".github/CODEOWNERS scaffolded (placeholder team — edit it, then enable branch protection; see docs/SECURITY_POSTURE.md)"
+else
+    _warn ".github/CODEOWNERS already exists — left unchanged. Verify it covers .githooks/, .claude/hooks/, .claude/gate_integrity.sha256, .claude/settings.json, .github/workflows/gate.yml, and CLAUDE.md."
+fi
+
 # Bypass note refspecs (so bypass audit trail leaves the machine)
 git config --add remote.origin.push  'refs/notes/bypasses:refs/notes/bypasses' 2>/dev/null || true
 git config --add remote.origin.fetch '+refs/notes/bypasses:refs/notes/bypasses' 2>/dev/null || true
@@ -940,6 +999,7 @@ pipx install "${GRAPH_PACKAGE}" --force --quiet 2>&1 | tail -3 || {
     GRAPH_INSTALLED=false
 }
 GRAPH_INSTALLED="${GRAPH_INSTALLED:-true}"
+GRAPH_BUILD_OK=false
 
 if $GRAPH_INSTALLED; then
     # Detect bin path
@@ -953,44 +1013,69 @@ if $GRAPH_INSTALLED; then
 
     if [ -n "$GRAPH_BIN_PATH" ] && [ -f "$GRAPH_BIN_PATH" ]; then
         _success "code-review-graph installed: ${GRAPH_BIN_PATH}"
+        GRAPH_BUILD_OK=false
 
         # Build the initial graph with multi-domain config
         _info "Building initial code graph (multi-domain: code + SQL + infra + CI)..."
         _info "This may take 2–5 minutes on large repositories (>100k LOC). Progress updates below."
         cd "$REPO_ROOT"
 
+        GRAPH_INCLUDE_ARGS=(
+            --include "*.py,*.ts,*.tsx,*.js,*.go,*.rs,*.java"
+            --include "*.sql,migrations/**"
+            --include "Dockerfile*,docker-compose*.yml,*.tf,*.hcl"
+            --include ".github/workflows/*.yml,.circleci/config.yml"
+            --include "nginx.conf,*.conf,.env.example"
+            --exclude ".git/,node_modules/,.venv/,dist/,build/,__pycache__/"
+        )
+
         # Background the build with a progress monitor (10-minute timeout for 1M LOC repos)
         if command -v timeout >/dev/null 2>&1; then
             if timeout 600 "${GRAPH_BIN_PATH}" build \
-                --include "*.py,*.ts,*.tsx,*.js,*.go,*.rs,*.java" \
-                --include "*.sql,migrations/**" \
-                --include "Dockerfile*,docker-compose*.yml,*.tf,*.hcl" \
-                --include ".github/workflows/*.yml,.circleci/config.yml" \
-                --include "nginx.conf,*.conf,.env.example" \
-                --exclude ".git/,node_modules/,.venv/,dist/,build/,__pycache__/" \
+                "${GRAPH_INCLUDE_ARGS[@]}" \
                 2>&1 | while IFS= read -r line; do
                     # Emit progress every 5 lines of output
                     _info "Graph: $line"
                 done; then
-                :  # Build succeeded
+                GRAPH_BUILD_OK=true
             else
                 EXIT_CODE=$?
                 if [ $EXIT_CODE -eq 124 ]; then
                     _warn "Graph build exceeded 10-minute timeout. This repository may exceed 1M LOC. Continuing without graph."
                 else
-                    _warn "Graph build failed (exit $EXIT_CODE). Graph mode inactive until resolved."
+                    # The --include/--exclude flags above are this framework's
+                    # own multi-domain convention, not a guaranteed-stable
+                    # code-review-graph CLI contract — a flag rename/removal
+                    # in a newer package release previously crashed the build
+                    # outright ("unrecognized arguments") and left graph mode
+                    # permanently, silently inactive with no retry attempted
+                    # and a final summary that still claimed success (it only
+                    # checked whether the PACKAGE installed, never whether the
+                    # BUILD actually completed). Retry with a bare `build`
+                    # before giving up, so a CLI drift degrades to reduced
+                    # domain coverage instead of zero graph at all.
+                    _warn "Graph build with multi-domain filters failed (exit ${EXIT_CODE}) — retrying with default scope (no --include/--exclude) in case this code-review-graph version's CLI flags have changed..."
+                    if timeout 600 "${GRAPH_BIN_PATH}" build 2>&1 | tail -20; then
+                        GRAPH_BUILD_OK=true
+                        _warn "Graph built with default scope only — SQL/infra/CI domain coverage may be reduced until the flag mismatch is resolved (check: ${GRAPH_BIN_PATH} build --help)."
+                    else
+                        _warn "Graph build failed even with default scope (exit $?). Graph mode inactive until resolved."
+                    fi
                 fi
             fi
         else
             # Fallback for systems without timeout command
-            "${GRAPH_BIN_PATH}" build \
-                --include "*.py,*.ts,*.tsx,*.js,*.go,*.rs,*.java" \
-                --include "*.sql,migrations/**" \
-                --include "Dockerfile*,docker-compose*.yml,*.tf,*.hcl" \
-                --include ".github/workflows/*.yml,.circleci/config.yml" \
-                --include "nginx.conf,*.conf,.env.example" \
-                --exclude ".git/,node_modules/,.venv/,dist/,build/,__pycache__/" \
-                2>&1 | tail -10 || _warn "Graph build failed — graph mode inactive until resolved."
+            if "${GRAPH_BIN_PATH}" build "${GRAPH_INCLUDE_ARGS[@]}" 2>&1 | tail -10; then
+                GRAPH_BUILD_OK=true
+            else
+                _warn "Graph build with multi-domain filters failed — retrying with default scope (no --include/--exclude) in case this code-review-graph version's CLI flags have changed..."
+                if "${GRAPH_BIN_PATH}" build 2>&1 | tail -20; then
+                    GRAPH_BUILD_OK=true
+                    _warn "Graph built with default scope only — SQL/infra/CI domain coverage may be reduced until the flag mismatch is resolved (check: ${GRAPH_BIN_PATH} build --help)."
+                else
+                    _warn "Graph build failed even with default scope — graph mode inactive until resolved."
+                fi
+            fi
         fi
 
         # Write .mcp.json — project-scoped, committed (NOT ~/.claude/settings.json)
@@ -1072,19 +1157,27 @@ echo "  ✓ Trust-root deny: .claude/settings.json (permissions.deny + Bash guar
 echo "  ✓ Init command:   .claude/commands/init-governance.md (run /init-governance next, instead of copy-pasting ${INIT_PKG_DST})"
 echo "  ✓ Checkpoint memory: .claude/checkpoint_tool.py + .claude/commands/checkpoint-search.md (mechanical capture + progressive-disclosure search)"
 echo "  ✓ CI workflow:    .github/workflows/gate.yml (CI parity backstop)"
+echo "  ✓ CODEOWNERS:     .github/CODEOWNERS (placeholder team — edit + enable branch protection, see below)"
 if [ "$BASKET" = "brownfield" ]; then
 echo "  ✓ Debt baseline:  .claude/baseline.json (unpopulated — init prompt fills it)"
 fi
 echo "  ✓ Org policy:     ${ORG_POLICY_PATH} (WEEKLY_LIMIT=${DEFAULT_WEEKLY_LIMIT}, daily=$(( DEFAULT_WEEKLY_LIMIT * DEFAULT_DAILY_BUDGET_PCT / 100 )) tokens)"
-if $GRAPH_INSTALLED 2>/dev/null; then
+if $GRAPH_INSTALLED 2>/dev/null && ${GRAPH_BUILD_OK:-false}; then
 echo "  ✓ Graph server:   code-review-graph ${GRAPH_PACKAGE##*==} (${GRAPH_BIN_PATH})"
 echo "  ✓ MCP config:     .mcp.json (committed — team-wide graph activation)"
+elif $GRAPH_INSTALLED 2>/dev/null; then
+# Package installed but the initial build never completed (see warnings
+# above) — distinct from "skipped" so this isn't misread as full success.
+# .mcp.json is still written/committed either way: the server can build its
+# index lazily later, but graph-backed review tools have nothing to query
+# until 'code-review-graph build' succeeds.
+echo "  ⚠ Graph server:   installed but index build FAILED — graph mode inactive (run manually: ${GRAPH_BIN_PATH:-code-review-graph} build)"
 else
 echo "  ⚠ Graph server:   skipped (install manually: pipx install ${GRAPH_PACKAGE})"
 fi
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo -e "${BLUE} ONE REMAINING STEP — required to complete setup:${RESET}"
+echo -e "${BLUE} REMAINING STEPS — required to complete setup:${RESET}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "  1. Open Claude Code in this directory:"
@@ -1105,5 +1198,19 @@ echo "  3. ${INIT_PKG_DST} is kept locally too, purely for reference if you'd"
 echo "     rather read the prompt before running it — running /init-governance"
 echo "     does not require opening it."
 echo ""
-echo "  After the init commit, your repo is fully governed."
+echo -e "  4. ${YELLOW}REQUIRED, not optional — do this in GitHub's repo settings, not here:${RESET}"
+echo "     a. Edit .github/CODEOWNERS: replace @your-org/platform-team with a"
+echo "        real team/user."
+echo "     b. Settings -> Branches -> protection rule for your default branch:"
+echo "        enable 'Require a pull request before merging' AND 'Require"
+echo "        review from Code Owners'."
+echo "     Until step (b) is done, every control this framework installs is"
+echo "     LOCAL-ONLY: git hooks live in the working tree, so a branch with no"
+echo "     hooks checked out (a fresh clone before the governance commit lands,"
+echo "     or a protected branch nothing has merged governance into yet) is"
+echo "     completely unguarded, and CI verifies internal self-consistency"
+echo "     only — it cannot stop a PR that edits gate.sh and its own integrity"
+echo "     pin together. See docs/SECURITY_POSTURE.md for the full threat model."
+echo ""
+echo "  After the init commit AND step 4, your repo is fully governed."
 echo ""

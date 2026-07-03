@@ -154,7 +154,29 @@ fi
 
 cd "$REPO_ROOT"
 
-[ -f ".claude/gate_state.json" ] || _error "No governed repo detected (.claude/gate_state.json not found). Nothing to remove."
+# Detect via ANY known install artifact, not gate_state.json alone. That file
+# is gitignored in most target repos (it's a local ledger, not committed
+# governance content), so a partial/interrupted install, a fresh clone of a
+# governed repo, or simply a prior `rm -rf .claude` mid-session left every
+# other artifact (.githooks/, CLAUDE.md, .claude/settings.json, .mcp.json)
+# in place while this single-file check reported "nothing to remove" and
+# refused to run — a real, reproducible dead end with no way to clean up
+# short of hand-deleting files. Any ONE governance artifact existing is
+# enough to proceed; the removal loops below already independently guard
+# each file/directory with its own existence check, so listing more
+# detection candidates here is safe — it only widens when the uninstaller is
+# willing to start, never what it deletes.
+_governed_repo_detected() {
+    [ -f ".claude/gate_state.json" ] && return 0
+    [ -f ".githooks/gate.sh" ] && return 0
+    [ -f ".claude/hooks/pre_bash_trust_root_guard.sh" ] && return 0
+    [ -f ".claude/checkpoint_tool.py" ] && return 0
+    [ -f ".claude/settings.json" ] && grep -q "pre_bash_trust_root_guard" ".claude/settings.json" 2>/dev/null && return 0
+    [ -f ".github/workflows/gate.yml" ] && grep -q "gate\.sh" ".github/workflows/gate.yml" 2>/dev/null && return 0
+    [ -f ".mcp.json" ] && grep -q "code-review-graph" ".mcp.json" 2>/dev/null && return 0
+    return 1
+}
+_governed_repo_detected || _error "No governed repo detected (checked .claude/gate_state.json, .githooks/gate.sh, .claude/hooks/pre_bash_trust_root_guard.sh, .claude/checkpoint_tool.py, .claude/settings.json, .github/workflows/gate.yml, .mcp.json — none found). Nothing to remove."
 
 # ── Build removal manifest ────────────────────────────────────────────────────
 _info "Scanning for installed framework artifacts..."

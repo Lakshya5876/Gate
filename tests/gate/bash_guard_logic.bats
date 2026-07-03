@@ -85,3 +85,43 @@ teardown() {
     # asserts the guard's documented behavior, not a gap. If this ever needs
     # to change, it's a deliberate policy call, not a silent regression.
 }
+
+# Regression coverage for a real, confirmed red-team finding: a `cd` into a
+# protected directory followed by a relative-path reference never puts the
+# literal substring ".githooks/" (or any protected marker) anywhere in the
+# command text, so the plain substring match above missed it entirely — a
+# demonstrated, no-prompt, no-denial bypass that neutered the gate outright.
+
+@test "guard blocks cd-indirection into .githooks (the confirmed critical bypass)" {
+    run run_bash_guard "cd .githooks && sed -i '' '1a\\nexit 0\\n' gate.sh"
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"'.githooks/'"* ]]
+}
+
+@test "guard blocks cd-indirection into .claude/hooks (self-neuter via a relative path)" {
+    run run_bash_guard 'cd .claude/hooks && echo "exit 0" > pre_bash_trust_root_guard.sh'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"'.claude/hooks/'"* ]]
+}
+
+@test "guard blocks a two-step nested cd into a protected directory" {
+    run run_bash_guard 'cd .claude && cd hooks && rm pre_bash_trust_root_guard.sh'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"'.claude/hooks/'"* ]]
+}
+
+@test "guard blocks cd-indirection reading the gate ledger" {
+    run run_bash_guard 'cd .claude && cat gate_state.json'
+    [ "$status" -eq 1 ]
+    [[ "$output" == *"'.claude/gate_state.json'"* ]]
+}
+
+@test "guard allows an unrelated cd into a benign directory" {
+    run run_bash_guard 'cd src && ls -la'
+    [ "$status" -eq 0 ]
+}
+
+@test "guard refuses 'cd -' rather than silently losing track of it" {
+    run run_bash_guard 'cd .githooks && echo hi; cd -'
+    [ "$status" -eq 1 ]
+}
