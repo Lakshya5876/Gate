@@ -27,6 +27,7 @@ This document describes what the framework touches, what it never reads, and how
 | `.claude/git_cache.json` | `gate.sh` | Short-lived git metadata cache (TTL: 60 s, gitignored) |
 | `.claude/checkpoints/index.jsonl`, `.claude/checkpoints/*.md`, `.claude/checkpoints/LATEST.md` | `checkpoint_tool.py` (`append` + hooks) | Checkpoint bodies (task, decisions, pending, resume instruction) plus git facts (sha, branch, dirty-file count). Gitignored by default — per-clone, not team-shared, unless a team deliberately opts in (see §7). Kept indefinitely, size-bounded only by manual pruning — no automatic rotation shipped yet. |
 | `.claude/session_state.json` (`checkpoint` sub-object) | `checkpoint_tool.py` hooks | Ephemeral pressure counters (files/commits touched since last checkpoint, session start time, nudge attempts) — gitignored, reset by `append` |
+| `.claude/commands/reconcile-governance.md` | `install.sh --upgrade` (only when the dev guide's content actually changed) | A unified diff of the framework's own bundled dev-guide markdown, plus instructions for Claude Code to propose (never silently apply) `CLAUDE.md` edits. Contains no repo-specific or developer data — the diff is between two versions of framework-shipped documentation. |
 
 ### What the framework never reads
 

@@ -1,0 +1,30 @@
+# Trust-root governance files — require code owner approval before merge to main/develop
+# Without this, a single PR can edit gate.sh + regenerate its own integrity pin, weakening the gate
+# These must be reviewed by a human every time they change
+
+# Git hooks — the enforcement layer
+.githooks/                          @platform-security-leads
+
+# Bash guard hook — prevents agent from disarming itself
+.claude/hooks/                      @platform-security-leads
+
+# Gate integrity manifest — pins every governance file's hash
+.claude/gate_integrity.sha256       @platform-security-leads
+
+# CI gate workflow — authoritative backstop if local hooks are stripped
+.github/workflows/gate.yml          @platform-security-leads
+
+# Gate state + ledger — token budgets, receipts, audit log
+.claude/gate_state.json             @platform-security-leads
+
+# Debt ratchet — technical debt baseline
+.claude/baseline.json               @platform-security-leads
+
+# Repo constitution — rules Claude Code must follow
+CLAUDE.md                           @platform-security-leads
+
+# Claude Code permissions — what the agent is allowed to do
+.claude/settings.json               @platform-security-leads
+
+# MCP server configuration — which external tools Claude Code connects to
+.mcp.json                           @platform-security-leads

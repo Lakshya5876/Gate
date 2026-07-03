@@ -29,11 +29,28 @@ The script detects `--upgrade`, skips basket selection, and runs a targeted re-c
 | File | Action |
 |------|--------|
 | `.githooks/gate.sh` | Replaced with the new template |
+| `.githooks/verify_governance_integrity.sh` | Replaced with the new template |
 | `.githooks/pre-commit` | Regenerated from current heredoc |
 | `.githooks/pre-push` | Regenerated from current heredoc |
+| `v1_claude_code_development_guide_*.md` | Re-fetched from the framework's current release copy |
+| `v1_implementation_package_*.md` | Re-fetched from the framework's current release copy |
+| `.claude/commands/init-governance.md` | Regenerated from the refreshed init-package content |
+| `.claude/settings.json` | Trust-root deny-list + Bash guard hook entries backfilled if missing (repo-specific `permissions.allow` entries are preserved) |
+| `.claude/hooks/pre_bash_trust_root_guard.sh` | Replaced with the new template |
+| `.claude/checkpoint_tool.py` / checkpoint memory scaffold | Backfilled if missing |
+| `.claude/gate_integrity.sha256` | Re-pinned to cover every file above — **CI will fail until this manifest is committed alongside the files it covers** |
 | `.github/workflows/gate.yml` | Replaced (unlike fresh install, which skips if present) |
 | `.claude/gate_state.json` — `framework_version` | Bumped to new semver |
 | `.claude/gate_state.json` — `framework_last_upgrade` | Set to current UTC timestamp |
+
+---
+
+## What it offers, but never does silently
+
+| Mechanism | When it triggers | What happens |
+|---|---|---|
+| **Deprecation cleanup** | The framework's `DEPRECATED_SINCE` list names a file that became obsolete in a version newer than this repo's previous `framework_version`, and that file still exists in your repo | Lists the obsolete file(s) and asks a single y/n confirmation before removing anything. Declining leaves them in place — nothing is ever force-deleted. |
+| **`/reconcile-governance` generation** | The dev guide's actual *content* changed since your last install/upgrade (not just its version number) | Generates `.claude/commands/reconcile-governance.md`, containing a unified diff of what changed. Running that command has Claude Code propose individually-justified edits to `CLAUDE.md` and wait for your explicit approval on each — `--upgrade` itself never edits `CLAUDE.md`. If the dev guide's content didn't change, no command is generated and nothing prompts you. |
 
 ---
 
@@ -42,7 +59,7 @@ The script detects `--upgrade`, skips basket selection, and runs a targeted re-c
 | File / Field | Why preserved |
 |---|---|
 | `.claude/baseline.json` | Debt ratchet — encodes your team's accepted technical debt; overwriting it would grandfather nothing and block everything |
-| `CLAUDE.md` | Repo constitution — team-authored, repo-specific; a framework upgrade has no business changing it |
+| `CLAUDE.md` | Repo constitution — team-authored, repo-specific; a framework upgrade never edits this directly (see `/reconcile-governance` above for the propose-and-approve path when the constitution's source content changed) |
 | `.mcp.json` | Graph server config — tied to the specific binary path pipx installed; regenerating it would break graph mode |
 | `gate_state.json — receipts` | Fingerprint cache — losing receipts forces every developer's next push to re-run the full test suite |
 | `gate_state.json — token.*` | Budget accounting — clearing it would reset daily spend tracking mid-day |
@@ -53,12 +70,14 @@ The script detects `--upgrade`, skips basket selection, and runs a targeted re-c
 
 ## After the upgrade
 
-The upgrade script prints the exact commit command. Run it:
+The upgrade script prints the exact commit command at the end of its own output — use that one verbatim, since it lists every file the run above actually touched (it will differ slightly upgrade to upgrade depending on what was backfilled). As of this version it is:
 
 ```bash
-git add .githooks/ .github/workflows/gate.yml .claude/gate_state.json
+git add .githooks/ .claude/gate_integrity.sha256 .claude/settings.json .claude/hooks/ .claude/checkpoint_tool.py .claude/commands/ .github/workflows/gate.yml .claude/gate_state.json
 git commit -m 'chore: upgrade governance framework to 1.0.0'
 ```
+
+If `/reconcile-governance` was generated, run it and resolve it (approve or reject each proposed `CLAUDE.md` edit) **before** this commit, so any resulting `CLAUDE.md` changes land in the same review as the rest of the upgrade rather than a separate follow-up PR.
 
 Push the commit through your normal PR flow. Every team member who pulls it gets the updated hooks automatically — no per-developer re-run of `install.sh` is needed.
 

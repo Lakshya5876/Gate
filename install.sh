@@ -719,8 +719,6 @@ if [ ! -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_packag
 fi
 REPO_DIR="${SCRIPT_DIR}"
 
-_check_framework_staleness "$REPO_DIR"
-
 # ── Argument parsing ──────────────────────────────────────────────────────────
 UPGRADE_MODE=false
 for _arg in "$@"; do
@@ -737,8 +735,14 @@ echo " Claude Code Governance Framework — ${FRAMEWORK_VERSION} Installer"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 
+# _require git/python3 MUST run before _check_framework_staleness — that
+# function shells out to git internally, so a machine truly missing git
+# would hit a raw "command not found" from the shell before ever reaching
+# _require's clean, actionable error message.
 _require git "Install git from https://git-scm.com/"
 _require python3 "Install Python 3.8+ from https://python.org/"
+
+_check_framework_staleness "$REPO_DIR"
 
 # Must be inside a git repo
 git rev-parse --git-dir >/dev/null 2>&1 || _error "Not inside a git repository. Run 'git init' first."

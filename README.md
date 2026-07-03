@@ -6,6 +6,17 @@ This repository is the single source of truth for deploying enterprise-grade AI 
 governance across engineering teams. It currently covers **Claude Code** and is structured
 to accommodate future tool integrations (Cursor, Copilot, and others) as they mature.
 
+## Prerequisites
+
+This framework is **bash + POSIX-tool based** and has no Windows-native path.
+
+- **OS:** macOS or Linux. Windows users must run it inside **WSL2** (Ubuntu or similar) — a native `cmd.exe`/PowerShell shell is not supported and install.sh/uninstall.sh will fail or behave unpredictably there.
+- **Required on `PATH`:** `git`, `bash` (3.2+, the macOS-default version is fine — nothing here requires bash 4), `python3` (stdlib only, no pip packages required by the framework itself).
+- **Required to actually use it:** the [Claude Code CLI](https://claude.ai/download) — `install.sh` only *warns* if it's missing (not a hard block), so it's possible to run the whole installer and only discover at the final step (`/init-governance`) that Claude Code was never installed. Install it before you start.
+- **Optional:** `pipx` (only needed for the MCP graph-server integration; the framework degrades gracefully without it).
+
+If `git` or `python3` is missing, `install.sh` fails fast with a message naming the missing dependency — it does not partially install.
+
 ## Active Branch
 
 `develop` is the active integration branch. All releases are cut from `develop` and all

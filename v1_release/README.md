@@ -1,5 +1,11 @@
 # V1 Release — Enterprise AI Development Governance Framework
 
+## Prerequisites
+
+- **OS:** macOS or Linux (or WSL2 on Windows — there is no native Windows/PowerShell path).
+- **On `PATH`:** `git`, `bash` 3.2+, `python3`.
+- **Installed separately:** the [Claude Code CLI](https://claude.ai/download) — required to run the one-time `/init-governance` step; `install.sh` only warns if it's missing, it doesn't block on it.
+
 ## What This Framework Does
 
 This framework is a **plug-and-play mechanical cage** that embeds un-bypassable enterprise
