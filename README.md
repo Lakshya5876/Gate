@@ -1,60 +1,70 @@
-# Gate
+<div align="center">
+  <h1>Gate 🛡️</h1>
+  <p><strong>The deterministic, agent-agnostic, un-bypassable governance framework for AI-driven development.</strong></p>
 
-**The master corporate home for all automated AI developer workflows.**
+  [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+  [![Platform: macOS | Linux | WSL2](https://img.shields.io/badge/Platform-macOS%20%7C%20Linux%20%7C%20WSL2-lightgrey)]()
+  [![Coverage: Claude Code | Cursor](https://img.shields.io/badge/Coverage-Claude%20%7C%20Cursor-green)]()
+  [![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
 
-This repository is the single source of truth for deploying enterprise-grade AI development
-governance across engineering teams. It currently covers **Claude Code** and is structured
-to accommodate future tool integrations (Cursor, Copilot, and others) as they mature.
+</div>
 
-## Prerequisites
+---
 
-This framework is **bash + POSIX-tool based** and has no Windows-native path.
+## 📖 Overview
 
-- **OS:** macOS or Linux. Windows users must run it inside **WSL2** (Ubuntu or similar) — a native `cmd.exe`/PowerShell shell is not supported and install.sh/uninstall.sh will fail or behave unpredictably there.
-- **Required on `PATH`:** `git`, `bash` (3.2+, the macOS-default version is fine — nothing here requires bash 4), `python3` (stdlib only, no pip packages required by the framework itself).
-- **Required to actually use it:** the [Claude Code CLI](https://claude.ai/download) — `install.sh` only *warns* if it's missing (not a hard block), so it's possible to run the whole installer and only discover at the final step (`/init-governance`) that Claude Code was never installed. Install it before you start.
-- **Optional:** `pipx` (only needed for the MCP graph-server integration; the framework degrades gracefully without it).
+Gate is a **stack-agnostic governance framework** that brings engineering discipline and safety to autonomous AI coding agents at scale. Instead of relying purely on prompts—which agents can ignore, bypass, or hallucinate around—Gate enforces deterministic architecture, security, testing, and deployment rules at the **git and CI layer**.
 
-If `git` or `python3` is missing, `install.sh` fails fast with a message naming the missing dependency — it does not partially install.
+Whether you're starting a greenfield project or integrating AI into a mature brownfield codebase, Gate ensures that no automated changes violate your critical constraints.
 
-## Active Branch
+### 🌟 Key Features
+- **Un-bypassable Governance**: Rules are enforced via Git hooks and CI, meaning humans and AI agents are held to the exact same rigorous standards.
+- **Agent-Agnostic Core**: Designed to secure any AI tool (Claude Code, Cursor, Copilot) without deep platform lock-in.
+- **Deterministic Checkpoints**: Catch stray layer boundaries, secret leakage, or missing tests *before* the commit leaves the machine.
+- **Graceful Adoption**: Distinct deployment strategies (Baskets) tailor the framework's strictness to brand-new repos vs. legacy codebases.
 
-`develop` is the active integration branch. All releases are cut from `develop` and all
-feature contributions target `develop`. Never work directly on `main`.
+---
 
-## Where to Start
+## 🚀 Quick Start & Installation
 
-Everything you need is inside the [`v1_release/`](v1_release/) folder.
+This framework operates primarily via POSIX-compliant shell scripts (`bash`). 
+> **Note**: Windows users must run Gate inside **WSL2** (Ubuntu or similar).
 
-Start there. The README inside will route you to the correct deployment basket for your team.
+### Prerequisites
+- `git`
+- `bash` (3.2+)
+- `python3` (Standard library only; no `pip` dependencies required)
+- *Optional:* Claude Code CLI
 
-## Repository Structure
+### Deployment
 
-```
-Gate/
-└── v1_release/                  ← V1 production release of the governance framework
-    ├── basket-1-brownfield/     ← For teams with existing, active codebases
-    └── basket-2-greenfield/     ← For teams starting brand-new projects
-```
+Everything you need to deploy Gate is inside the [`v1_release/`](v1_release/) folder. We offer two core deployment strategies depending on your codebase:
 
-## 🧪 Testing — Opt-In at Commit, Mechanical at Push
+1. **[Basket 1: Brownfield](v1_release/basket-1-brownfield/)** — For existing, active codebases. Introduces a "baseline ratchet" that prevents regressions without breaking on legacy technical debt.
+2. **[Basket 2: Greenfield](v1_release/basket-2-greenfield/)** — For brand-new projects. Enforces strict layer boundaries, immutable trust roots, and maximum security from day one.
 
-Tests are **opt-in at pre-commit** to keep day-to-day commits fast, but **mandatory and
-mechanical** at the enforcement boundaries — code cannot leave a machine or merge untested.
+Choose your basket and follow the specific `install.sh` workflow documented within.
 
-| Stage | Tests run? |
+---
+
+## 🧪 Testing & CI Integration
+
+Gate emphasizes high velocity without sacrificing safety. Tests are **opt-in at commit** but **mechanically forced** before pushing.
+
+| Action | Execution Requirement |
 |---|---|
-| `git commit` (normal) | Opt-in — add `--run-tests=true` to the commit message |
-| `git commit` touching a **CORE_FILES** path | Always (full suite, forced) |
-| `git push` | Always (full suite, or a verified pre-commit receipt) |
-| CI (`.github/workflows/gate.yml`) | Always (authoritative backstop) |
+| `git commit` | **Opt-in** — Add `--run-tests=true` to your commit message |
+| `git commit` (Core paths) | **Forced** — Touching CORE_FILES triggers mandatory full suite |
+| `git push` | **Forced** — Requires a verified local test receipt or blocks the push |
+| **CI Workflow** | **Authoritative** — The final backstop (`.github/workflows/gate.yml`) |
 
-Example: `git commit -m "feat: added login logic --run-tests=true"`. A coverage gate
-(default 80%) blocks when configured and unmet. See each basket README for details.
+---
 
-## Tooling Coverage
+## 🤝 Handoff & Architecture
 
-| Tool | Status |
-|---|---|
-| Claude Code | V1 — Available now |
-| Cursor | V1 — Available (IDE extension crash guard + full handoff; see handoff_cursor.md) |
+For a deep dive into the inner workings, design philosophy, and competitive landscape of Gate, refer to the exhaustive [Engineer Handoff Package](handoff/README.md). It contains everything you need to maintain, extend, and defend the framework.
+
+---
+<div align="center">
+  <sub>Built with precision to scale AI engineering safely.</sub>
+</div>

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# install.sh — Claude Code governance framework installer
+# install.sh — Gate governance framework installer
 # Usage: ./install.sh  (must be run from within the cloned repository)
 #
 # What this does:
@@ -614,7 +614,7 @@ except Exception:
 
     echo ""
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo " Claude Code Governance Framework — Upgrade to ${FRAMEWORK_SEMVER}"
+    echo " Gate Governance Framework — Upgrade to ${FRAMEWORK_SEMVER}"
     echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
 
@@ -758,7 +758,7 @@ done
 # ── STEP 0: Preflight checks ──────────────────────────────────────────────────
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " Claude Code Governance Framework — ${FRAMEWORK_VERSION} Installer"
+echo " Gate Governance Framework — ${FRAMEWORK_VERSION} Installer"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 

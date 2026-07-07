@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# uninstall.sh — Remove every trace of the Claude Code governance framework
+# uninstall.sh — Remove every trace of the Gate governance framework
 #
 # Usage: ./uninstall.sh
 #
@@ -413,5 +413,5 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 echo ""
 echo "To commit the removal:"
 echo "  git add -u"
-echo "  git commit -m 'chore: remove Claude Code governance framework'"
+echo "  git commit -m 'chore: remove Gate governance framework'"
 echo ""
