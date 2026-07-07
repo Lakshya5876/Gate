@@ -1,4 +1,4 @@
-# ai-dev-workflow
+# Gate
 
 **The master corporate home for all automated AI developer workflows.**
 
@@ -31,7 +31,7 @@ Start there. The README inside will route you to the correct deployment basket f
 ## Repository Structure
 
 ```
-ai-dev-workflow/
+Gate/
 └── v1_release/                  ← V1 production release of the governance framework
     ├── basket-1-brownfield/     ← For teams with existing, active codebases
     └── basket-2-greenfield/     ← For teams starting brand-new projects

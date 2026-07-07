@@ -102,7 +102,7 @@ _bounded_git_fetch() {
 
 _check_framework_staleness() {
     # This framework is meant to be cloned ONCE to a persistent local path
-    # (e.g. ~/ai-dev-workflow) and reused across many target repos — nothing
+    # (e.g. ~/Gate) and reused across many target repos — nothing
     # here auto-updates it. install.sh had this exact gap: a user ran an old
     # local clone and got confusing behavior with no indication their copy
     # was out of date. Same risk applies here (running an old uninstall.sh
@@ -125,7 +125,7 @@ _check_framework_staleness() {
     case "$behind" in ''|*[!0-9]*) return 0 ;; esac
     [ "$behind" -gt 0 ] || return 0
     echo ""
-    echo "⚠ Your local ai-dev-workflow clone (${repo_dir}) is ${behind} commit(s)"
+    echo "⚠ Your local Gate clone (${repo_dir}) is ${behind} commit(s)"
     echo "  behind ${upstream} — you may be missing recent fixes, including to"
     echo "  this uninstaller itself."
     echo "  Recommended: git -C '${repo_dir}' pull, then re-run this uninstaller."
@@ -145,9 +145,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 _check_framework_staleness "$SCRIPT_DIR"
 
-# Guard: refuse to run against the ai-dev-workflow repo itself
+# Guard: refuse to run against the Gate repo itself
 if [ "$REPO_ROOT" = "$SCRIPT_DIR" ]; then
-    _error "You are inside the ai-dev-workflow framework repo — not your target repo.
+    _error "You are inside the Gate framework repo — not your target repo.
        cd into the repo where you ran install.sh, then run:
          ${SCRIPT_DIR}/uninstall.sh"
 fi

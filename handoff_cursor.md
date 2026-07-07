@@ -1,4 +1,4 @@
-# Handoff: ai-dev-workflow V1 Governance Framework
+# Handoff: Gate V1 Governance Framework
 
 **Project Status:** Production-ready for 1M LOC enterprise repositories  
 **Current Branch:** `init_release`  
@@ -12,7 +12,7 @@
 
 ### What This Software Does
 
-`ai-dev-workflow` is an **enterprise governance framework for Claude Code**—a standardized, mechanical enforcement layer that makes autonomous AI-driven development safe and scalable at 1M LOC scale. It codifies architecture, security, testing, and deployment rules into a system that:
+`Gate` is an **enterprise governance framework for Claude Code**—a standardized, mechanical enforcement layer that makes autonomous AI-driven development safe and scalable at 1M LOC scale. It codifies architecture, security, testing, and deployment rules into a system that:
 
 - **Prevents regressions** via pre-commit/pre-push mechanical gates (not advisory)
 - **Enforces layer boundaries** (Presentation → Application → Infrastructure → Domain)
@@ -1066,9 +1066,9 @@ c540b43  fix: resolve fatal Appendix B ambiguity in B8/C8 alias step
 - **Lesson:** Any ambiguity in governance specs will be resolved incorrectly by an LLM
 
 #### **Bug 4: GitHub CDN 404 (RESOLVED — local-only install)**
-- **Symptom:** `curl https://raw.githubusercontent.com/BankofLoyal/ai-dev-workflow/...` returned 404
+- **Symptom:** `curl https://raw.githubusercontent.com/BankofLoyal/Gate/...` returned 404
 - **Root cause:** Repo was private; CDN distribution was the wrong model regardless
-- **Resolution:** install.sh is now **local-only** (commit d5161c7). Run it from inside the target repo by absolute path: `cd <target-repo> && /path/to/ai-dev-workflow/install.sh`. All files copied via `cp` from `REPO_DIR`. No curl/wget, no CDN, no network dependency.
+- **Resolution:** install.sh is now **local-only** (commit d5161c7). Run it from inside the target repo by absolute path: `cd <target-repo> && /path/to/Gate/install.sh`. All files copied via `cp` from `REPO_DIR`. No curl/wget, no CDN, no network dependency.
 - **Status:** Permanent fix. CDN distribution is not planned for V1.
 
 ### Code Quirks & Workarounds
@@ -1255,7 +1255,7 @@ git commit -m "chore: reset gate ledger"
 **If GitHub CDN is down:**
 ```bash
 # install.sh detects local files automatically — use local clone distribution
-bash /path/to/local/ai-dev-workflow/install.sh
+bash /path/to/local/Gate/install.sh
 ```
 
 ---

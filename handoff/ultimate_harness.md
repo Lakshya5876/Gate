@@ -1,5 +1,5 @@
 # ultimate_harness.md
-## Complete Engineering Curriculum: ai-dev-workflow
+## Complete Engineering Curriculum: Gate
 ### From Absolute Zero to the Level of the Engineer Who Built It
 
 ---
@@ -1150,9 +1150,9 @@ This project does ALSO include a CI gate (`.github/workflows/gate.yml`) for defe
 
 This project has two distinct roles:
 
-### The framework repo (ai-dev-workflow)
+### The framework repo (Gate)
 
-Lives at `~/ai-dev-workflow/` (or wherever it was cloned). This is what you are studying. It contains:
+Lives at `~/Gate/` (or wherever it was cloned). This is what you are studying. It contains:
 - `install.sh` — the bootstrapper
 - `templates/gate.sh` — the enforcement engine (the source of truth)
 - `templates/gate_state.json` — the initial state schema
@@ -1181,7 +1181,7 @@ The target repo is where developers work. gate.sh enforces the rules defined in 
 ## 3.2 The Installation Flow: What install.sh Does to a Foreign Codebase
 
 ```
-Developer runs: cd /path/to/target-repo && /path/to/ai-dev-workflow/install.sh
+Developer runs: cd /path/to/target-repo && /path/to/Gate/install.sh
 
 install.sh:
   1. Verify git, python3 present
@@ -1336,7 +1336,7 @@ This project configures two PreToolUse hooks:
 **Hook 1 — Global agent approval** (`~/.claude/settings.json`):
 Fires before any `Agent` tool call. Prompts the developer on `/dev/tty` for approval before Claude Code spawns a subagent.
 
-**Hook 2 — Project write guard** (`.claude/settings.json` in the ai-dev-workflow repo itself):
+**Hook 2 — Project write guard** (`.claude/settings.json` in the Gate repo itself):
 Fires before any `Write | Edit | MultiEdit` tool call. Reads `gate_state.json`, checks `code_writes_permitted` for the current branch. On release branches where this is false, the file write is blocked before it happens — the file never touches disk.
 
 This creates a **three-layer defense**:
@@ -2978,7 +2978,7 @@ The project's write guard must be a PreToolUse hook, not PostToolUse. The file n
 
 ## 7.3 The Write/Edit/MultiEdit Guard — pre_tool_write_guard.sh
 
-From `.claude/settings.json` in the ai-dev-workflow framework repo:
+From `.claude/settings.json` in the Gate framework repo:
 
 ```json
 {
@@ -4731,8 +4731,8 @@ fi
 
 | PR | Branch | Target | Status | Contents |
 |----|--------|--------|--------|----------|
-| [#1](https://github.com/BankofLoyal/ai-dev-workflow/pull/1) | `init_release` | `develop` | Merged | Full v1 framework scaffolding |
-| [#2](https://github.com/BankofLoyal/ai-dev-workflow/pull/2) | `feat/token-budget-limits` | `develop` | Open | Token budget fix + curriculum + bug patches |
+| [#1](https://github.com/BankofLoyal/Gate/pull/1) | `init_release` | `develop` | Merged | Full v1 framework scaffolding |
+| [#2](https://github.com/BankofLoyal/Gate/pull/2) | `feat/token-budget-limits` | `develop` | Open | Token budget fix + curriculum + bug patches |
 
 ---
 
@@ -4780,7 +4780,7 @@ A completeness review of the curriculum (conducted after all prior addenda were 
 
 A third-party repo, `multica-ai/andrej-karpathy-skills`, was cloned to `/tmp/eval/` and statically audited (no scripts executed, no install steps run — read-only file inspection only, per an explicit execution-boundary constraint). The repo packages four behavioral principles — attributed to [Andrej Karpathy's observations](https://x.com/karpathy/status/2015883857489522876) on common LLM coding failure modes — as a single CLAUDE.md/SKILL.md pair with zero executable code.
 
-**Important scoping correction made during this work:** an earlier pass mistakenly evaluated the four principles against an unrelated project's CLAUDE.md (a different repo's engineering constitution, cross-referenced from prior context in the same session) rather than against ai-dev-workflow's own artifacts. ai-dev-workflow has no CLAUDE.md of its own — it is a framework that *generates* CLAUDE.md for downstream repos via the init prompt. The gap analysis and all edits below were redone grounded in the actual generator artifacts: the two development guides (`v1_claude_code_development_guide_existing.md` / `_new.md`) and the two implementation packages that specify what a generated CLAUDE.md must contain (§C1 brownfield / §B2 greenfield).
+**Important scoping correction made during this work:** an earlier pass mistakenly evaluated the four principles against an unrelated project's CLAUDE.md (a different repo's engineering constitution, cross-referenced from prior context in the same session) rather than against Gate's own artifacts. Gate has no CLAUDE.md of its own — it is a framework that *generates* CLAUDE.md for downstream repos via the init prompt. The gap analysis and all edits below were redone grounded in the actual generator artifacts: the two development guides (`v1_claude_code_development_guide_existing.md` / `_new.md`) and the two implementation packages that specify what a generated CLAUDE.md must contain (§C1 brownfield / §B2 greenfield).
 
 ### The Four Principles vs. What Already Existed
 
@@ -4803,7 +4803,7 @@ Four insertions, mirrored across both the brownfield and greenfield baskets (six
 
 ### Why Not a Verbatim Copy
 
-The source repo's CLAUDE.md was not copied in as a bolt-on file. It has no enforcement mechanism behind it — pure text, no gate. ai-dev-workflow already has Phase 2/4 checkpoints and a mechanical verification loop; threading the four principles into those existing gates (rather than adding an unenforced parallel document) means the additions inherit the same checkpoint-write and pre-push mechanics that already govern everything else the guide specifies.
+The source repo's CLAUDE.md was not copied in as a bolt-on file. It has no enforcement mechanism behind it — pure text, no gate. Gate already has Phase 2/4 checkpoints and a mechanical verification loop; threading the four principles into those existing gates (rather than adding an unenforced parallel document) means the additions inherit the same checkpoint-write and pre-push mechanics that already govern everything else the guide specifies.
 
 ---
 
@@ -4972,7 +4972,7 @@ The two audits disagreed on a number (8.1 vs 8.3) but agreed on substance — bo
 
 ## A12. A Fresh, Broader Audit Scored Lower — Verifying That's a Wider Net, Not a Regression (2026-07-02)
 
-*Changes made in the session after A11 was committed, in response to a fresh-session, six-repo comparative audit (not a continuation of the A6–A11 narrow-scope loop) that scored ai-dev-workflow lowest of all six repos at 5.0/10 — down from the ~8.3/10 the A6–A11 rounds had converged on.*
+*Changes made in the session after A11 was committed, in response to a fresh-session, six-repo comparative audit (not a continuation of the A6–A11 narrow-scope loop) that scored Gate lowest of all six repos at 5.0/10 — down from the ~8.3/10 the A6–A11 rounds had converged on.*
 
 ### Resolving "Did We Go Backwards?" Before Anything Else
 

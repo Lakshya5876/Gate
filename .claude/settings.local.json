@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd /tmp/eval/ecc && find . -iname '*governance*' -o -iname '*safety-guard*' -o -iname '*gateguard*' | grep -v '.git' | grep -v node_modules | head -40)",
+      "Bash(cd /tmp/eval/ecc && wc -l scripts/hooks/governance-capture.js scripts/hooks/gateguard-fact-force.js *)",
+      "Read(//private/tmp/eval/ponytail/**)",
+      "Bash(grep -A5 '\"dependencies\"' package.json ponytail-mcp/package.json pi-extension/package.json)",
+      "Bash(cd /tmp/eval/caveman && grep -n \"plugins/caveman\\\\|mirror\\\\|sync\\\\|diff\" tests/verify_repo.py | head -40)",
+      "Bash(cd /tmp/eval/ecc && wc -l .github/workflows/ci.yml && sed -n '1,80p' .github/workflows/ci.yml)",
+      "Bash(cd /tmp/eval/gstack && wc -l browse/test/cdp-allowlist.test.ts && sed -n '1,80p' browse/test/cdp-allowlist.test.ts)"
+    ]
+  }
+}

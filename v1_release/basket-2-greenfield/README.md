@@ -35,7 +35,7 @@ inside your new project* using the framework's path.
 
 **Step 1 — Clone the framework once (anywhere)**
 ```bash
-git clone <repository_url> ~/tools/ai-dev-workflow
+git clone <repository_url> ~/tools/Gate
 ```
 
 **Step 2 — Initialize a fresh workspace**
@@ -48,7 +48,7 @@ git commit --allow-empty -m "chore: repository birth"
 
 **Step 3 — Run the installer by its path (from inside your new project)**
 ```bash
-~/tools/ai-dev-workflow/install.sh        # choose [g] greenfield when prompted
+~/tools/Gate/install.sh        # choose [g] greenfield when prompted
 ```
 The installer copies the dev guide + init package into your project root, scaffolds
 `.claude/`, wires `.githooks/`, and installs the CI parity workflow at

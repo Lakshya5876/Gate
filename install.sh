@@ -477,7 +477,7 @@ _bounded_git_fetch() {
 
 _check_framework_staleness() {
     # This framework is meant to be cloned ONCE to a persistent local path
-    # (e.g. ~/ai-dev-workflow) and reused across many target repos — nothing
+    # (e.g. ~/Gate) and reused across many target repos — nothing
     # here auto-updates it. A real user ran an old local clone and got a
     # confusing "why doesn't /init-governance exist" report, because their
     # copy predated that feature entirely; install.sh had no way to tell
@@ -504,7 +504,7 @@ _check_framework_staleness() {
     case "$behind" in ''|*[!0-9]*) return 0 ;; esac
     [ "$behind" -gt 0 ] || return 0
     echo ""
-    echo "⚠ Your local ai-dev-workflow clone (${repo_dir}) is ${behind} commit(s)"
+    echo "⚠ Your local Gate clone (${repo_dir}) is ${behind} commit(s)"
     echo "  behind ${upstream} — you may be missing recent fixes or features."
     echo "  Recommended: git -C '${repo_dir}' pull, then re-run this installer."
     echo ""
@@ -739,10 +739,10 @@ PYEOF
     echo ""
 }
 
-# Locate the ai-dev-workflow framework directory (helpers exist now, so _error works)
+# Locate the Gate framework directory (helpers exist now, so _error works)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [ ! -f "${SCRIPT_DIR}/v1_release/basket-1-brownfield/v1_implementation_package_existing.md" ]; then
-    _error "Framework files not found. Ensure you cloned ai-dev-workflow. Usage: cd <your-target-repo> && /path/to/ai-dev-workflow/install.sh"
+    _error "Framework files not found. Ensure you cloned Gate. Usage: cd <your-target-repo> && /path/to/Gate/install.sh"
 fi
 REPO_DIR="${SCRIPT_DIR}"
 
@@ -776,9 +776,9 @@ git rev-parse --git-dir >/dev/null 2>&1 || _error "Not inside a git repository. 
 
 REPO_ROOT=$(git rev-parse --show-toplevel)
 
-# Guard: refuse to govern the ai-dev-workflow repo itself
+# Guard: refuse to govern the Gate repo itself
 if [ "$REPO_ROOT" = "$SCRIPT_DIR" ]; then
-    _error "You are inside the ai-dev-workflow framework repo — not your target repo.
+    _error "You are inside the Gate framework repo — not your target repo.
        cd into the repo you want to govern, then run:
          ${SCRIPT_DIR}/install.sh"
 fi

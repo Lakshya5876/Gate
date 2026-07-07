@@ -4,7 +4,7 @@
 
 Run `./install.sh --upgrade` when:
 
-- A new version of `ai-dev-workflow` is available and you want its gate.sh enforcement improvements.
+- A new version of `Gate` is available and you want its gate.sh enforcement improvements.
 - The team lead has announced a framework version bump (e.g. v1.0.0 → v1.1.0).
 - `gate_state.json` shows a `framework_version` older than the installer's `FRAMEWORK_SEMVER`.
 
@@ -17,7 +17,7 @@ Do **not** run it for routine development — it only touches framework infrastr
 From inside the governed repository (same directory you originally ran `install.sh` from):
 
 ```bash
-/path/to/ai-dev-workflow/install.sh --upgrade
+/path/to/Gate/install.sh --upgrade
 ```
 
 The script detects `--upgrade`, skips basket selection, and runs a targeted re-copy flow.

@@ -53,11 +53,11 @@ with your repository in V1. Contact the platform team for monorepo governance as
 The installer always writes into **the repository you are standing in** (it resolves the
 target with `git rev-parse --show-toplevel`). So you clone the framework once, then run it
 *from inside your target repo* using the framework's path. Do **not** run it from inside the
-`ai-dev-workflow` clone — that would govern the framework itself.
+`Gate` clone — that would govern the framework itself.
 
 **Step 1 — Clone the framework once (anywhere)**
 ```bash
-git clone <repository_url> ~/tools/ai-dev-workflow
+git clone <repository_url> ~/tools/Gate
 ```
 
 **Step 2 — Enter your target repository and verify the LOC ceiling**
@@ -79,7 +79,7 @@ Confirm the `total` is under 1,000,000 LOC. If it is, continue.
 **Step 3 — Create a setup branch and run the installer by its path**
 ```bash
 git checkout -b chore/claude-init
-~/tools/ai-dev-workflow/install.sh        # choose [b] brownfield when prompted
+~/tools/Gate/install.sh        # choose [b] brownfield when prompted
 ```
 The installer copies the dev guide + init package into your repo root, scaffolds `.claude/`
 (including an unpopulated `baseline.json`), wires `.githooks/`, and installs the CI parity
